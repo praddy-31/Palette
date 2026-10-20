@@ -1,7 +1,7 @@
 /target
 /tmp
 .DS_Store
-.claude/settings.local.json
+.claude/
 # Tauri: generated schemas, and icon sizes for platforms Palette doesn't ship
 /app/gen
 /app/icons/android
@@ -13,7 +13,6 @@
 /app/binaries
 /dist
 *.dmg
-/.claude/worktrees/
 
 # Local only: owner notes, personal docs, files waiting to be deleted
 CLAUDE.md
