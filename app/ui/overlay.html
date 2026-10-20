@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Palette quick switch</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body data-view="overlay">
+  <div class="panel overlay">
+    <aside class="side">
+      <div id="filter" class="filter" data-empty="Type to filter"></div>
+      <ul id="list" class="list" aria-label="Themes"></ul>
+    </aside>
+    <section class="stage">
+      <div id="preview" class="desk"></div>
+      <div class="hint"><b>↑↓</b> theme <b>←→</b> wallpaper <b>⏎</b> apply <b>esc</b> close <span class="spacer"></span><span id="mode"></span></div>
+    </section>
+    <div id="toast" class="toast" role="status"></div>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>

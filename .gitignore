@@ -1,0 +1,27 @@
+/target
+/tmp
+.DS_Store
+.claude/settings.local.json
+# Tauri: generated schemas, and icon sizes for platforms Palette doesn't ship
+/app/gen
+/app/icons/android
+/app/icons/ios
+/app/icons/Square*
+/app/icons/StoreLogo.png
+/app/icons/icon.ico
+/app/icons/64x64.png
+/app/binaries
+/dist
+*.dmg
+/.claude/worktrees/
+
+# Local only: owner notes, personal docs, files waiting to be deleted
+CLAUDE.md
+CLAUDE.local.md
+/docs/ROADMAP.md
+/docs/DECISIONS.md
+/docs/IDEAS.md
+/docs/user_test.md
+/docs/CONFIG_INVENTORY.md
+/docs/PUBLISHING.md
+/to_delete/

@@ -1,0 +1,56 @@
+#!/bin/bash
+# A small starter SketchyBar config from Palette: workspaces, front app, battery, clock.
+# It is yours to edit. Palette only adds one line that loads the theme's colours.
+# Colours are 0xAARRGGBB. The values below are used until Palette's colours load.
+
+PILL=0xf0313244
+FG=0xffcdd6f4
+ACCENT=0xff89b4fa
+
+PLUGIN_DIR="$CONFIG_DIR/plugins"
+
+# A floating bar: transparent, so each item is its own pill.
+sketchybar --bar position=top height=34 y_offset=6 margin=10 \
+                 padding_left=4 padding_right=4 color=0x00000000
+
+sketchybar --default \
+           updates=when_shown \
+           icon.font="SF Pro:Semibold:13.0" \
+           label.font="SF Pro:Semibold:13.0" \
+           icon.color=$FG label.color=$FG \
+           icon.padding_left=8 icon.padding_right=4 \
+           label.padding_left=4 label.padding_right=8 \
+           padding_left=4 padding_right=4 \
+           background.color=$PILL background.corner_radius=8 background.height=24
+
+# Workspaces 1-5. With AeroSpace they are its workspaces; without it, macOS Spaces.
+if command -v aerospace >/dev/null 2>&1; then
+  sketchybar --add event aerospace_workspace_change
+  for sid in 1 2 3 4 5; do
+    sketchybar --add item "space.$sid" left \
+               --subscribe "space.$sid" aerospace_workspace_change \
+               --set "space.$sid" icon="$sid" icon.padding_right=8 label.drawing=off \
+                     script="$PLUGIN_DIR/space.sh $sid" \
+                     click_script="aerospace workspace $sid"
+  done
+else
+  for sid in 1 2 3 4 5; do
+    sketchybar --add space "space.$sid" left \
+               --set "space.$sid" associated_space="$sid" icon="$sid" \
+                     icon.padding_right=8 label.drawing=off \
+                     script="$PLUGIN_DIR/space.sh $sid"
+  done
+fi
+
+sketchybar --add item front_app left \
+           --set front_app icon.drawing=off script="$PLUGIN_DIR/front_app.sh" \
+           --subscribe front_app front_app_switched
+
+sketchybar --add item clock right \
+           --set clock update_freq=10 icon.drawing=off script="$PLUGIN_DIR/clock.sh"
+
+sketchybar --add item battery right \
+           --set battery update_freq=120 script="$PLUGIN_DIR/battery.sh" \
+           --subscribe battery system_woke power_source_change
+
+sketchybar --update

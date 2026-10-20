@@ -1,0 +1,86 @@
+# A powerline prompt in three colours that belong to each theme (primary = the accent,
+# secondary and tertiary = its nearest distinct neighbours), with readable text on each.
+# To use it: cp examples/starship.toml ~/.config/starship.toml && palette refresh
+"$schema" = 'https://starship.rs/config-schema.json'
+
+format = """
+[](primary)\
+$os\
+$directory\
+[](fg:primary bg:secondary)\
+$git_branch\
+$git_status\
+[](fg:secondary bg:tertiary)\
+$nodejs\
+$bun\
+$rust\
+$golang\
+$python\
+$cmd_duration\
+[](fg:tertiary bg:lighter_background)\
+$time\
+[ ](fg:lighter_background)\
+\n$character"""
+
+[os]
+disabled = false
+style = "bg:primary fg:on_primary"
+format = "[ $symbol]($style)"
+
+[os.symbols]
+Macos = "󰀵"
+
+[directory]
+style = "bg:primary fg:on_primary"
+format = "[ $path ]($style)"
+truncation_length = 3
+truncation_symbol = "…/"
+
+[git_branch]
+symbol = ""
+style = "bg:secondary fg:on_secondary"
+format = "[ $symbol $branch ]($style)"
+
+[git_status]
+style = "bg:secondary fg:on_secondary"
+format = "[($all_status$ahead_behind )]($style)"
+
+[nodejs]
+symbol = ""
+style = "bg:tertiary fg:on_tertiary"
+format = "[ $symbol( $version) ]($style)"
+
+[bun]
+symbol = "󰿕"
+style = "bg:tertiary fg:on_tertiary"
+format = "[ $symbol( $version) ]($style)"
+
+[rust]
+symbol = ""
+style = "bg:tertiary fg:on_tertiary"
+format = "[ $symbol( $version) ]($style)"
+
+[golang]
+symbol = ""
+style = "bg:tertiary fg:on_tertiary"
+format = "[ $symbol( $version) ]($style)"
+
+[python]
+symbol = ""
+style = "bg:tertiary fg:on_tertiary"
+format = "[ $symbol( $version) ]($style)"
+
+[cmd_duration]
+min_time = 2000
+style = "bg:tertiary fg:on_tertiary"
+format = "[  $duration ]($style)"
+
+[time]
+disabled = false
+time_format = "%R"
+style = "bg:lighter_background fg:foreground"
+format = "[  $time ]($style)"
+
+[character]
+success_symbol = "[❯](bold primary)"
+error_symbol = "[❯](bold red)"

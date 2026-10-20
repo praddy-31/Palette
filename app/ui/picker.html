@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Palette</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body data-view="picker">
+  <div class="panel">
+    <header class="top">
+      <div class="brand"><span class="logo"></span>Palette</div>
+      <div class="now"><span id="now"></span><span class="keycap-sm" id="hint"></span></div>
+    </header>
+    <input id="search" class="search" type="text" placeholder="Search themes" autocomplete="off" spellcheck="false">
+    <main id="grid" class="grid" aria-label="Themes"></main>
+    <footer class="bottom">
+      <div class="seg" role="group" aria-label="Theme">
+        <button id="prev" class="btn" title="Previous theme">‹</button>
+        <button id="undo" class="btn icon" title="Undo: back to the theme before"><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M9 14L4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3"/></svg></button>
+        <button id="next" class="btn" title="Next theme">›</button>
+      </div>
+      <span class="spacer"></span>
+      <div class="seg" role="group" aria-label="Wallpaper">
+        <button id="wp-prev" class="btn" title="Previous wallpaper">‹</button>
+        <button id="walls" class="btn wname" title="This theme's wallpapers (Settings)"><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" d="M4 5h16v14H4z"/><path fill="currentColor" d="M6 17l4-5 3 3.5 2-2.5 3 4z"/></svg><span id="walls-n"></span></button>
+        <button id="wp-next" class="btn" title="Next wallpaper">›</button>
+      </div>
+      <button id="settings" class="btn icon solo" title="Settings"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M19.4 13a7.6 7.6 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.4 7.4 0 0 0-1.7-1L15 3.5h-4l-.4 2.5a7.4 7.4 0 0 0-1.7 1l-2.4-1-2 3.4L6.6 11a7.6 7.6 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.4 7.4 0 0 0 1.7 1l.4 2.5h4l.4-2.5a7.4 7.4 0 0 0 1.7-1l2.4 1 2-3.4zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg></button>
+    </footer>
+    <div id="toast" class="toast" role="status"></div>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>

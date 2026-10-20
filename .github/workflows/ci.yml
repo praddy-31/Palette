@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    # Apple silicon runner, same architecture as the release build.
+    runs-on: macos-14
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache cargo and target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-cargo-
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      # The app crate's build script checks the bundled CLI
+      # (app/binaries/palette-<triple>) exists; sidecar.sh builds and copies it.
+      - name: Sidecar CLI
+        run: sh app/sidecar.sh
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Tests
+        run: cargo test --workspace
+
+      # Fake home: files only, no reloads, wallpaper or appearance changes.
+      - name: Render every bundled theme
+        env:
+          PALETTE_HOME: ${{ runner.temp }}/home
+          NO_COLOR: "1"
+        run: |
+          set -eu
+          mkdir -p "$PALETTE_HOME"
+          bin=target/release/palette
+          # `palette list` prints: "<mark> <name> <origin> <mode>", mark is * or a space.
+          themes=$("$bin" list | awk '$1 == "*" { print $2 " " $3; next } { print $1 " " $2 }' |
+            awk '$2 == "bundled" { print $1 }')
+          [ -n "$themes" ] || { echo "no bundled themes listed"; exit 1; }
+          count=0
+          for theme in $themes; do  # names are [a-z0-9-], safe to split
+            echo "::group::palette set $theme"
+            "$bin" set "$theme"
+            echo "::endgroup::"
+            count=$((count + 1))
+          done
+          echo "Rendered $count bundled themes."
+          "$bin" list

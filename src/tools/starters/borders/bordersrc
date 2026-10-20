@@ -1,0 +1,14 @@
+#!/bin/bash
+# A starter JankyBorders config from Palette. It is yours to edit.
+# Palette adds one line at the end that sets the colours to the theme's.
+# Colours are 0xAARRGGBB. The values below are used until Palette's colours load.
+
+options=(
+  style=round
+  width=6.0
+  hidpi=off
+  active_color=0xff89b4fa
+  inactive_color=0xff45475a
+)
+
+borders "${options[@]}"

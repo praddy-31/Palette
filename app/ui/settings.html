@@ -1,0 +1,354 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Palette Settings</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body data-view="settings" class="window">
+  <div class="shell">
+    <nav class="tabs" aria-label="Settings sections">
+      <div class="tabs-title"><span class="logo"></span>Palette</div>
+      <button data-tab="apps" class="tab on">Apps</button>
+      <button data-tab="themes" class="tab">Get themes</button>
+      <button data-tab="wallpapers" class="tab">Wallpapers</button>
+      <button data-tab="colours" class="tab">Colours</button>
+      <button data-tab="tools" class="tab">Get the tools</button>
+      <button data-tab="setup" class="tab">Setup</button>
+      <button data-tab="move" class="tab">Move to another Mac</button>
+      <button data-tab="general" class="tab">General</button>
+      <button data-tab="schedule" class="tab">Schedule</button>
+      <div class="tabs-group">Desktop</div>
+      <button data-tab="bar" class="tab">Bar</button>
+      <button data-tab="windows" class="tab">Windows</button>
+      <button data-tab="borders" class="tab">Borders</button>
+      <button data-tab="prompt" class="tab">Prompt</button>
+      <button data-tab="macos" class="tab">Dock &amp; menu bar</button>
+    </nav>
+
+    <main class="settings">
+      <!-- ---------------- Welcome (first launch; General → Welcome tour) ---------------- -->
+      <section data-pane="welcome" hidden>
+        <div class="steps" id="wl-dots"></div>
+        <div id="wl-body"></div>
+        <div class="wl-nav">
+          <button id="wl-skip" class="link">Skip the tour</button>
+          <span class="spacer"></span>
+          <button id="wl-back" class="btn">Back</button>
+          <button id="wl-next" class="btn primary">Next</button>
+        </div>
+      </section>
+
+      <!-- ---------------- Apps ---------------- -->
+      <section data-pane="apps">
+        <h1>Themed apps</h1>
+        <p class="note">Everything is on by default. Switch an app off to keep its own look:
+          Palette takes its line out of that app's config (backed up first) and restores it.</p>
+        <div id="apps"></div>
+      </section>
+
+      <!-- ---------------- Get themes ---------------- -->
+      <section data-pane="themes" hidden>
+        <h1>Get themes</h1>
+        <p class="note">Community themes made for Omarchy; they work here too, wallpapers included.
+          The list is built in, so browsing stays offline; Install downloads that one theme.
+          Palette takes only its colours, wallpapers and preview, never config files or scripts.</p>
+        <div class="gt-bar">
+          <input id="gt-search" class="search" type="text" placeholder="Search themes" autocomplete="off" spellcheck="false">
+          <select id="gt-filter" class="select">
+            <option value="">All</option>
+            <option value="colourful">Colourful</option>
+            <option value="muted">Muted</option>
+            <option value="monochrome">Monochrome</option>
+            <option value="light">Light</option>
+            <option value="installed">Installed</option>
+          </select>
+        </div>
+        <div id="gt-grid" class="gt-grid"></div>
+        <h2>From a link</h2>
+        <div class="row">
+          <div style="flex:1"><input id="gt-url" class="search" type="text" placeholder="https://github.com/someone/omarchy-something-theme" spellcheck="false"></div>
+          <button id="gt-install-url" class="btn">Install</button>
+        </div>
+        <div id="gt-offer" class="plan" hidden></div>
+        <div id="gt-others"></div>
+      </section>
+
+      <!-- ---------------- Wallpapers ---------------- -->
+      <section data-pane="wallpapers" hidden>
+        <h1>Wallpapers</h1>
+        <p class="note">Each theme has its own wallpapers. Switching to a theme shows the starred one (☆ on hover), or its first;
+          a theme with none leaves your desktop alone.</p>
+        <div class="row">
+          <div><div class="title">Theme</div><div class="sub" id="wp-sub"></div></div>
+          <select id="wp-theme" class="select"></select>
+        </div>
+        <div class="actions">
+          <button id="wp-add" class="btn">Add images…</button>
+          <button id="wp-next" class="btn">Next wallpaper</button>
+        </div>
+        <div id="wp-grid" class="wp-grid"></div>
+        <div class="row">
+          <div><div class="title">This theme's wallpaper folder <span class="sub" id="wp-size"></span></div><div class="sub path" id="wp-dir"></div></div>
+          <button id="wp-reveal" class="btn">Show in Finder</button>
+        </div>
+        <h2>Library</h2>
+        <p class="note">Pictures kept for any theme, in one folder. Add one to a theme only if you want to.
+          Palette never deletes them on its own: remove what you don't need here, or tidy the folder in Finder.</p>
+        <div class="row">
+          <div><div class="title">Your library <span class="sub" id="lib-sub"></span></div><div class="sub path" id="lib-dir"></div></div>
+          <button id="lib-add" class="btn">Add images…</button>
+          <button id="lib-reveal" class="btn">Show in Finder</button>
+        </div>
+        <div id="lib-grid"></div>
+        <div id="lib-act" class="plan lib-act" hidden></div>
+        <h3>Get from a link</h3>
+        <div class="row">
+          <div style="flex:1"><input id="gl-url" class="search" type="text" placeholder="A GitHub repo or folder, or a picture's link" spellcheck="false" autocomplete="off"></div>
+          <button id="gl-go" class="btn">Look</button>
+        </div>
+        <div id="gl-out" class="plan gl" hidden></div>
+        <h2>Make wallpapers</h2>
+        <div class="row wrap">
+          <div><div class="title">Recolour to this theme</div><div class="sub">A copy of each picked image, painted in the theme's colours</div></div>
+          <select id="wp-engine" class="select" title="Which program recolours" hidden>
+            <option value="palette">Palette</option>
+            <option value="gowall">gowall</option>
+          </select>
+          <select id="wp-strength" class="select" title="How far the picture is pulled towards the theme">
+            <option value="subtle">Subtle</option>
+            <option value="balanced" selected>Balanced</option>
+            <option value="strong">Strong</option>
+          </select>
+          <button id="wp-recolour" class="btn">Recolour…</button>
+        </div>
+        <div class="row wrap">
+          <div><div class="title">Generate</div><div class="sub">Paints a new wallpaper from the theme's colours</div></div>
+          <select id="wp-style" class="select">
+            <option value="gradient">Gradient</option>
+            <option value="mesh">Mesh</option>
+            <option value="waves">Waves</option>
+            <option value="topo">Topographic</option>
+            <option value="geometric">Geometric</option>
+            <option value="grain">Dot grain</option>
+          </select>
+          <button id="wp-generate" class="btn">Generate</button>
+          <button id="wp-variant" class="btn" title="Paint another variant of this style">Another</button>
+        </div>
+        <h2>New theme</h2>
+        <div class="row">
+          <div><div class="title">New theme from a wallpaper</div><div class="sub">Works out a theme from a picture's colours, with the picture as its wallpaper</div></div>
+          <button id="nt-pick" class="btn">Choose picture…</button>
+        </div>
+        <div id="nt-draft" class="plan nt" hidden></div>
+      </section>
+
+      <!-- ---------------- Colours ---------------- -->
+      <section data-pane="colours" hidden>
+        <h1>Colours</h1>
+        <p class="note">Change any colour of a theme. Your changes sit on top of the theme's own colours, so
+          Reset always brings the original back. If it's the active theme, every app updates as you go.</p>
+        <div class="row">
+          <div><div class="title">Theme</div><div class="sub" id="co-sub"></div></div>
+          <select id="co-theme" class="select"></select>
+        </div>
+        <div id="co-preview" class="co-preview"></div>
+        <h2>Readability</h2>
+        <div id="co-check"></div>
+        <h2>Every colour</h2>
+        <p class="note">Click a swatch for the colour wheel (and the eyedropper), or type a hex code.
+          <span class="co-mark"></span> marks a colour you changed.</p>
+        <div id="co-grid"></div>
+        <div class="actions">
+          <button id="co-reset" class="btn danger">Reset all to the original</button>
+        </div>
+      </section>
+
+      <!-- ---------------- Get the tools ---------------- -->
+      <section data-pane="tools" hidden>
+        <h1>Get the tools</h1>
+        <p class="note">The programs Palette themes but doesn't ship. Palette never installs anything itself:
+          copy a command, paste it into Terminal, and it runs there, where you can see it.</p>
+        <div id="tools"></div>
+      </section>
+
+      <!-- ---------------- Setup ---------------- -->
+      <section data-pane="setup" hidden>
+        <h1>Setup</h1>
+        <div class="row">
+          <div><div class="title">Set up all apps</div><div class="sub">Adds Palette's line to each switched-on app's config (backed up first), then reloads them</div></div>
+          <button id="setup" class="btn">Set up</button>
+        </div>
+        <div class="row">
+          <div><div class="title">Re-apply the theme</div><div class="sub">Renders the current theme again (after editing starship.toml, say)</div></div>
+          <button id="refresh" class="btn">Re-apply</button>
+        </div>
+        <div class="row">
+          <div><div class="title">Remove Palette from all configs</div><div class="sub">Every app back exactly as before Palette; your themes and wallpapers stay</div></div>
+          <button id="remove-all" class="btn danger">Remove…</button>
+        </div>
+        <h2>Check</h2>
+        <div class="row">
+          <div><div class="title">Check setup</div><div class="sub">Is every app installed, hooked up and up to date?</div></div>
+          <button id="check" class="btn">Check</button>
+        </div>
+        <p class="note legend">Every app Palette can theme: <b class="s ok">✓</b> themed · <b class="s off">–</b> off or not installed.
+          <b class="s info">ⓘ</b> notes are for information; <b class="s fix">!</b> needs you.</p>
+        <div id="check-out" class="checks"></div>
+      </section>
+
+      <!-- ---------------- Move ---------------- -->
+      <section data-pane="move" hidden>
+        <h1>Move to another Mac</h1>
+        <p class="note">Export makes a plain folder with your themes and settings (and, if you like,
+          wallpapers and app configs). Copy it over with AirDrop, a USB stick or a private git repo,
+          then Import it on the other Mac.</p>
+        <h2>Export</h2>
+        <label class="row">
+          <div><div class="title">Include wallpapers</div><div class="sub">Every theme's backgrounds</div></div>
+          <input id="exp-walls" type="checkbox" class="switch">
+        </label>
+        <label class="row">
+          <div><div class="title">Include app configs</div><div class="sub" id="configs-sub"></div></div>
+          <input id="exp-configs" type="checkbox" class="switch">
+        </label>
+        <div class="row">
+          <div><div class="title">Export</div><div class="sub">Choose a folder; a "Palette Export" folder is made inside it</div></div>
+          <button id="export" class="btn">Export…</button>
+        </div>
+        <h2>Import</h2>
+        <div class="row">
+          <div><div class="title">Import</div><div class="sub">Choose a Palette Export folder; you'll see what changes before anything does</div></div>
+          <button id="import" class="btn">Import…</button>
+        </div>
+        <div id="import-plan" class="plan" hidden></div>
+      </section>
+
+      <!-- ---------------- General ---------------- -->
+      <section data-pane="general" hidden>
+        <h1>General</h1>
+        <div class="row">
+          <div><div class="title">Quick switch shortcut</div><div class="sub">Opens the quick-switch overlay from anywhere</div></div>
+          <span id="hotkey" class="keycap"></span>
+          <button id="record" class="btn">Change…</button>
+        </div>
+        <label class="row">
+          <div><div class="title">Next theme: favourites only</div><div class="sub">Tray Next, the bar pill's scroll and <code>palette next</code> step through your ★ themes (all themes while you have none)</div></div>
+          <input id="favs-only" type="checkbox" class="switch">
+        </label>
+        <label class="row">
+          <div><div class="title">Open at login</div><div class="sub">Starts quietly in the menu bar</div></div>
+          <input id="login" type="checkbox" class="switch">
+        </label>
+        <div class="row">
+          <div><div class="title">Welcome tour</div><div class="sub">The five-step introduction from the first launch</div></div>
+          <button id="tour" class="btn">Show</button>
+        </div>
+        <div class="row">
+          <div><div class="title">Command-line tool</div><div class="sub" id="cli-sub"></div></div>
+          <button id="cli" class="btn">Install</button>
+        </div>
+        <div class="row callout">
+          <div><div class="title">Everything here is also a terminal command</div>
+            <div class="sub">Run <code>palette help</code> (or <code>palette &lt;command&gt; --help</code>) to see them all.</div></div>
+          <button id="copy-help" class="btn">Copy</button>
+        </div>
+      </section>
+
+      <!-- ---------------- Desktop: bar, windows, borders (desktop.* in app.js) ---------------- -->
+      <section data-pane="bar" hidden>
+        <h1>Bar</h1>
+        <p class="note">Your SketchyBar, built from pills. Drag items to reorder them or move them between pills,
+          click one to change it, and press Apply. Colours follow the theme.</p>
+        <div id="dk-bar"></div>
+      </section>
+      <section data-pane="windows" hidden>
+        <h1>Windows</h1>
+        <p class="note">AeroSpace's gaps, layout, workspaces, app rules and keyboard shortcuts. Palette changes
+          these key by key in your aerospace.toml; comments and everything else stay as you wrote them.</p>
+        <div id="dk-windows"></div>
+      </section>
+      <section data-pane="borders" hidden>
+        <h1>Borders</h1>
+        <p class="note">The coloured outline JankyBorders draws around windows. Changes show straight away.</p>
+        <div id="dk-borders"></div>
+      </section>
+      <section data-pane="prompt" hidden>
+        <h1>Prompt</h1>
+        <p class="note">Your Starship prompt, built from coloured blocks. Palette changes your starship.toml key by
+          key; other settings and comments stay. Colours follow the theme.</p>
+        <div id="dk-prompt"></div>
+      </section>
+      <section data-pane="macos" hidden>
+        <h1>Dock &amp; menu bar</h1>
+        <p class="note">macOS's own settings, the same switches as in System Settings. They change straight away,
+          and switching back is the same switch.</p>
+        <div id="dk-macos"></div>
+      </section>
+
+      <!-- ---------------- Schedule ---------------- -->
+      <section data-pane="schedule" hidden>
+        <h1>Schedule</h1>
+        <p class="note">A day theme from sunrise and a night theme from sunset, worked out on this Mac. No network and no Location permission.</p>
+        <label class="row">
+          <div><div class="title">Switch by time of day</div><div class="sub" id="sc-status">Off</div></div>
+          <input id="sc-on" type="checkbox" class="switch">
+        </label>
+        <div class="row">
+          <div><div class="title">Day theme</div></div>
+          <select id="sc-day" class="select"></select>
+        </div>
+        <div class="row">
+          <div><div class="title">Night theme</div></div>
+          <select id="sc-night" class="select"></select>
+        </div>
+        <div class="row">
+          <div><div class="title">Switch at</div></div>
+          <select id="sc-mode" class="select">
+            <option value="sun">Sunrise and sunset</option>
+            <option value="fixed">Fixed times</option>
+          </select>
+        </div>
+        <div id="sc-sun">
+          <div class="row nested">
+            <div><div class="title">City</div><div class="sub" id="sc-place"></div></div>
+            <button id="sc-suggest" class="btn" hidden></button>
+          </div>
+          <div class="sc-find">
+            <input id="sc-q" class="search" type="text" placeholder="Search cities (Singapore, London, Tokyo…)" autocomplete="off" spellcheck="false">
+            <select id="sc-cities" class="select" size="5"></select>
+          </div>
+          <div class="row nested">
+            <div><div class="title">Or type coordinates</div><div class="sub">Latitude (north +) and longitude (east +)</div></div>
+            <input id="sc-lat" class="search sc-num" type="text" inputmode="decimal" placeholder="1.35" spellcheck="false">
+            <input id="sc-lon" class="search sc-num" type="text" inputmode="decimal" placeholder="103.82" spellcheck="false">
+          </div>
+        </div>
+        <div id="sc-fixed" hidden>
+          <div class="row nested">
+            <div><div class="title">Day starts</div></div>
+            <input id="sc-day-at" class="select" type="time">
+          </div>
+          <div class="row nested">
+            <div><div class="title">Night starts</div></div>
+            <input id="sc-night-at" class="select" type="time">
+          </div>
+        </div>
+        <div class="row">
+          <div><div class="title">Today</div><div class="sub" id="sc-today">-</div></div>
+        </div>
+        <div class="row">
+          <div><div class="title">Next change</div><div class="sub" id="sc-next">-</div></div>
+        </div>
+        <div class="row">
+          <div><div class="title">Your choice wins until the next change</div><div class="sub">If you pick another theme by hand, Palette leaves it alone until the next sunrise or sunset</div></div>
+        </div>
+      </section>
+    </main>
+  </div>
+  <div id="toast" class="toast" role="status"></div>
+  <script src="app.js"></script>
+  <script src="desktop.js"></script>
+</body>
+</html>
