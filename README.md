@@ -65,17 +65,27 @@ Apple silicon Macs only for now.
 brew install --cask praddy-31/tap/palette
 ```
 
-This installs Palette.app and the `palette` command. Or download the DMG from
-[GitHub Releases](https://github.com/praddy-31/palette/releases) and drag Palette to
-Applications; then get the `palette` command from **Settings → Command-line tool**, which
-links `~/.local/bin/palette` to the copy inside the app (`~/.local/bin` must be on your
-`PATH`; it is on most setups).
+This installs Palette.app and the `palette` command.
 
-Palette is ad-hoc signed, because there is no paid Apple developer account behind it.
-On first open macOS may refuse it. Either:
+### From the DMG
 
-- open System Settings, then Privacy & Security, and press **Open Anyway**; or
-- run `xattr -dr com.apple.quarantine /Applications/Palette.app`.
+1. Download `Palette-<version>-arm64.dmg` from
+   [GitHub Releases](https://github.com/praddy-31/Palette/releases), open it and drag
+   Palette to Applications.
+2. Before the first open, run this once in Terminal:
+
+   ```sh
+   xattr -dr com.apple.quarantine /Applications/Palette.app
+   ```
+
+   Palette is ad-hoc signed, not notarised (there is no paid Apple developer account
+   behind it), so macOS blocks a downloaded copy with "Palette can't be opened" or
+   "Palette is damaged". It isn't damaged: the command removes the download flag macOS
+   puts on files from the internet. Instead of the command you can open Palette once,
+   then go to System Settings → Privacy & Security and press **Open Anyway**.
+3. For the `palette` command, open **Settings → Command-line tool**. It links
+   `~/.local/bin/palette` to the copy inside the app (`~/.local/bin` must be on your
+   `PATH`; it is on most setups).
 
 Building from source needs Rust, Xcode Command Line Tools and the Tauri CLI
 (`cargo install tauri-cli --version '^2'`); no Node. See [CONTRIBUTING.md](CONTRIBUTING.md).
