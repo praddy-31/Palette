@@ -1,0 +1,6 @@
+# Palette: {{ theme }} (generated; read by fzf through FZF_DEFAULT_OPTS_FILE)
+--color=fg:{{ foreground }},bg:-1,hl:{{ accent }}
+--color=fg+:{{ bright_foreground }},bg+:{{ selection }},hl+:{{ accent }}
+--color=info:{{ dark_foreground }},prompt:{{ accent }},pointer:{{ magenta }}
+--color=marker:{{ green }},spinner:{{ cyan }},header:{{ muted }}
+--color=border:{{ muted }},label:{{ foreground }},query:{{ foreground }},gutter:-1

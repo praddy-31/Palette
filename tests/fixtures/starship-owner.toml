@@ -1,0 +1,101 @@
+"$schema" = 'https://starship.rs/config-schema.json'
+
+format = """
+[░▒▓](foreground)\
+$os\
+[](bg:blue fg:foreground)\
+$directory\
+[](fg:blue bg:muted)\
+$git_branch\
+$git_status\
+[](fg:muted bg:lighter_background)\
+$nodejs\
+$bun\
+$rust\
+$golang\
+$php\
+[](fg:lighter_background bg:background)\
+$time\
+[ ](fg:background)\
+\n$character"""
+
+[directory]
+style = "fg:bright_foreground bg:blue"
+format = "[ $path ]($style)"
+truncation_length = 3
+truncation_symbol = "…/"
+
+[directory.substitutions]
+"Documents" = "󰈙 "
+"Downloads" = " "
+"Music" = " "
+"Pictures" = " "
+
+[git_branch]
+symbol = ""
+style = "bg:muted"
+format = '[[ $symbol $branch ](fg:blue bg:muted)]($style)'
+
+[git_status]
+style = "bg:muted"
+format = '[[($all_status$ahead_behind )](fg:blue bg:muted)]($style)'
+
+[nodejs]
+symbol = ""
+style = "bg:lighter_background"
+format = '[[ $symbol ($version) ](fg:blue bg:lighter_background)]($style)'
+
+[bun]
+symbol = ""
+style = "bg:lighter_background"
+format = '[[ $symbol ($version) ](fg:blue bg:lighter_background)]($style)'
+
+[rust]
+symbol = ""
+style = "bg:lighter_background"
+format = '[[ $symbol ($version) ](fg:blue bg:lighter_background)]($style)'
+
+[golang]
+symbol = ""
+style = "bg:lighter_background"
+format = '[[ $symbol ($version) ](fg:blue bg:lighter_background)]($style)'
+
+[php]
+symbol = ""
+style = "bg:lighter_background"
+format = '[[ $symbol ($version) ](fg:blue bg:lighter_background)]($style)'
+
+[time]
+disabled = false
+time_format = "%R" # Hour:Minute Format
+style = "bg:background"
+format = '[[  $time ](fg:#a0a9cb bg:background)]($style)'
+
+[os]
+style = "bg:foreground fg:darker_background"
+format = "[ $symbol ]($style)"
+disabled = false
+
+[os.symbols]
+Windows = "󰍲"
+Ubuntu = "󰕈"
+SUSE = ""
+Raspbian = "󰐿"
+Mint = "󰣭"
+Macos = "󰀵"
+Manjaro = ""
+Linux = "󰌽"
+Gentoo = "󰣨"
+Fedora = "󰣛"
+Alpine = ""
+Amazon = ""
+Android = ""
+AOSC = ""
+Arch = "󰣇"
+Artix = "󰣇"
+EndeavourOS = ""
+CentOS = ""
+Debian = "󰣚"
+Redhat = "󱄛"
+RedHatEnterprise = "󱄛"
+Pop = ""

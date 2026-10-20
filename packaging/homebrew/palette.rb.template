@@ -1,0 +1,37 @@
+cask "palette" do
+  version "{{VERSION}}"
+  sha256 "{{SHA256}}"
+
+  url "https://github.com/praddy-31/palette/releases/download/v#{version}/Palette-#{version}-arm64.dmg"
+  name "Palette"
+  desc "Theme switcher that restyles the whole desktop from one palette file"
+  homepage "https://github.com/praddy-31/palette"
+
+  depends_on macos: ">= :ventura"
+  depends_on arch: :arm64
+
+  app "Palette.app"
+  binary "#{appdir}/Palette.app/Contents/MacOS/palette-cli", target: "palette"
+
+  # Only runs with `brew uninstall --zap`. ~/.config/palette holds your themes
+  # (including ones you made or installed), so --zap removes those too.
+  zap trash: [
+    "~/.config/palette",
+    "~/Library/Caches/dev.palette.switcher",
+    "~/Library/LaunchAgents/Palette.plist",
+    "~/Library/Preferences/dev.palette.switcher.plist",
+    "~/Library/WebKit/dev.palette.switcher",
+  ]
+
+  caveats <<~EOS
+    Palette is ad-hoc signed, not notarised by Apple (it has no paid developer
+    account). The first time you open it, macOS may refuse; allow it in
+      System Settings > Privacy & Security > Open Anyway
+    Or, if you prefer, remove the download quarantine yourself:
+      xattr -dr com.apple.quarantine /Applications/Palette.app
+
+    To point your apps (SketchyBar, borders, terminals, editors…) at Palette:
+      palette init
+    It backs up each config first and only adds one import line.
+  EOS
+end

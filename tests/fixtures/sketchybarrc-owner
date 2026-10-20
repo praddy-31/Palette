@@ -1,0 +1,162 @@
+#!/bin/bash
+# SketchyBar - Tokyo Night (night)
+#   left : workspaces, then a stats pill (CPU GPU TEMP POWER MEM DISK VPN NET)
+#   right: habits, weather, brightness, volume, battery, clock
+#   Every item opens the matching app or Settings pane when clicked.
+# Plugins run as "bash <script>", so they need no chmod +x. This file does.
+
+export PATH="$PATH:/opt/homebrew/bin"
+PLUGIN_DIR="$HOME/.config/sketchybar/plugins"
+
+# Colours, format 0xAARRGGBB (alpha first)
+PILL=0xf0292e42
+BLUE=0xff7aa2f7
+FG=0xffc0caf5
+GREY=0xff737aa2
+GREEN=0xff9ece6a
+# Added by palette init (undo: palette init --remove)
+[ -f "$HOME/.config/palette/current/sketchybar.sh" ] && source "$HOME/.config/palette/current/sketchybar.sh"
+
+# Fonts (the Nerd Font version of JetBrains Mono is needed for the icons)
+FONT="JetBrainsMono Nerd Font"
+APPFONT="sketchybar-app-font:Regular:14.0"
+
+# Nerd Font glyphs written as UTF-8 bytes, so this file stays plain ASCII
+CLOCK_ICON=$(printf '\xef\x80\x97')
+ICON_CPU=$(printf '\xef\x8b\x9b')
+ICON_GPU=$(printf '\xef\x84\x88')
+ICON_MEM=$(printf '\xee\xbf\x85')
+ICON_DISK=$(printf '\xef\x82\xa0')
+ICON_NET=$(printf '\xef\x80\x99')
+ICON_TEMP=$(printf '\xef\x8b\x89')
+ICON_PWR=$(printf '\xef\x87\xa6')
+ICON_VPN=$(printf '\xef\x84\xb2')
+
+# What a click opens. Settings panes use the x-apple.systempreferences: URL scheme.
+OPEN_AM='open -a "Activity Monitor"'
+OPEN_STORAGE='open "x-apple.systempreferences:com.apple.settings.Storage"'
+OPEN_WIFI='open "x-apple.systempreferences:com.apple.wifi-settings-extension"'
+OPEN_NETWORK='open "x-apple.systempreferences:com.apple.Network-Settings.extension"'
+OPEN_DISPLAYS='open "x-apple.systempreferences:com.apple.Displays-Settings.extension"'
+OPEN_SOUND='open "x-apple.systempreferences:com.apple.Sound-Settings.extension"'
+OPEN_BATTERY='open "x-apple.systempreferences:com.apple.Battery-Settings.extension"'
+
+# The bar itself is invisible; the pills below are what you see
+sketchybar --bar position=top height=36 y_offset=4 color=0x00000000 \
+  padding_left=10 padding_right=10 shadow=off
+
+sketchybar --default \
+  icon.font="$FONT:Bold:13.0" label.font="$FONT:Bold:12.0" \
+  icon.color=$FG label.color=$FG padding_left=3 padding_right=3 \
+  icon.padding_left=5 icon.padding_right=3 label.padding_left=0 label.padding_right=5
+
+# ======================= LEFT: workspaces =======================
+sketchybar --add event aerospace_workspace_change
+
+SPACES=()
+for sid in 1 2 3 4 5 6; do      # must match WORKSPACES in plugins/spaces.sh
+  sketchybar --add item space.$sid left \
+    --set space.$sid icon="$sid" icon.color=$GREY \
+      icon.padding_left=8 icon.padding_right=8 \
+      label.font="$APPFONT" label.y_offset=-1 label.padding_right=8 label.drawing=off \
+      background.color=$BLUE background.corner_radius=8 background.height=22 \
+      background.drawing=off padding_left=1 padding_right=1 \
+      click_script="/opt/homebrew/bin/aerospace workspace $sid"
+  SPACES+=("space.$sid")
+done
+
+# Hidden helper: refreshes the blue highlight and the app icons on every workspace
+sketchybar --add item space_dispatcher left \
+  --set space_dispatcher drawing=off update_freq=30 script="bash $PLUGIN_DIR/spaces.sh" \
+  --subscribe space_dispatcher aerospace_workspace_change front_app_switched
+
+# Active app (icon + name): switched off to save space; the workspace buttons and the
+# window border already show where you are. To bring it back, remove the "# " from the
+# block below and add front_app after "${SPACES[@]}" in the bracket line under it.
+# sketchybar --add item front_app left \
+#   --set front_app icon.font="$APPFONT" icon.color=$BLUE icon.padding_left=10 \
+#     label.padding_left=2 label.padding_right=12 label.max_chars=16 \
+#     script="bash $PLUGIN_DIR/front_app.sh" \
+#   --subscribe front_app front_app_switched
+
+sketchybar --add bracket left_pill "${SPACES[@]}" \
+  --set left_pill background.color=$PILL background.corner_radius=14 \
+    background.height=30 background.border_width=0
+
+# ======================= LEFT, after the workspaces: stats =======================
+sketchybar --add item stats_gap left \
+  --set stats_gap width=6 padding_left=0 padding_right=0 icon.drawing=off label.drawing=off
+
+stat_item() {   # $1 = item name, $2 = icon, $3 = what a click opens
+  sketchybar --add item "$1" left \
+    --set "$1" icon="$2" icon.color=$BLUE label="--" click_script="$3" \
+      padding_left=1 padding_right=1 icon.padding_left=4 icon.padding_right=2 label.padding_right=4
+}
+stat_item cpu  "$ICON_CPU"  "$OPEN_AM"
+stat_item gpu  "$ICON_GPU"  "$OPEN_AM"
+stat_item temp "$ICON_TEMP" "$OPEN_AM"
+stat_item pwr  "$ICON_PWR"  "$OPEN_AM"
+stat_item mem  "$ICON_MEM"  "$OPEN_AM"
+stat_item disk "$ICON_DISK" "$OPEN_STORAGE"
+stat_item vpn  "$ICON_VPN"  "$OPEN_NETWORK"
+stat_item net  "$ICON_NET"  "$OPEN_WIFI"      # the icon becomes the Wi-Fi state (stats.sh)
+
+# These two only appear when they matter; stats.sh switches them on:
+#   disk from 80% full, vpn while a VPN is connected
+sketchybar --set disk drawing=off
+sketchybar --set vpn drawing=off label.drawing=off icon.color=$GREEN icon.padding_right=6
+
+sketchybar --set cpu icon.padding_left=12
+sketchybar --set net label.width=38 label.align=right label.padding_right=12
+
+# Hidden helper: one script updates all the stats every 5 seconds
+sketchybar --add item stats_dispatcher left \
+  --set stats_dispatcher drawing=off update_freq=5 script="bash $PLUGIN_DIR/stats.sh"
+
+sketchybar --add bracket stats_pill cpu gpu temp pwr mem disk vpn net \
+  --set stats_pill background.color=$PILL background.corner_radius=14 \
+    background.height=30 background.border_width=0
+
+# ======================= RIGHT (added right to left) =======================
+sketchybar --add item clock right \
+  --set clock icon="$CLOCK_ICON" icon.color=$BLUE update_freq=30 label.padding_right=12 \
+    click_script="open -a Calendar" \
+    script='sketchybar --set $NAME label="$(date "+%a %d %H:%M")"'
+
+sketchybar --add item battery right \
+  --set battery label="--" update_freq=120 click_script="$OPEN_BATTERY" script="bash $PLUGIN_DIR/widgets.sh battery" \
+  --subscribe battery power_source_change system_woke
+
+sketchybar --add item volume right \
+  --set volume label="--" click_script="$OPEN_SOUND" script="bash $PLUGIN_DIR/widgets.sh volume" \
+  --subscribe volume volume_change
+
+sketchybar --add item brightness right \
+  --set brightness label="--" click_script="$OPEN_DISPLAYS" script="bash $PLUGIN_DIR/widgets.sh brightness" \
+  --subscribe brightness brightness_change
+
+sketchybar --add item weather right \
+  --set weather label="--" icon.padding_left=12 update_freq=900 click_script='open -a Weather' \
+    script="bash $PLUGIN_DIR/widgets.sh weather"
+
+sketchybar --add bracket status_pill weather brightness volume battery clock \
+  --set status_pill background.color=$PILL background.corner_radius=14 \
+    background.height=30 background.border_width=0
+
+# ======================= RIGHT, left of the status pill: Habit Tracker =======================
+# Today's habits done/due (+ a running timer). On/off in the app: Settings -> Integrations.
+sketchybar --add event habit_tracker_update
+sketchybar --add item habits_gap right \
+  --set habits_gap width=6 padding_left=0 padding_right=0 icon.drawing=off label.drawing=off \
+  --add item habits right \
+  --set habits icon.padding_left=12 label.padding_right=12 label="--" update_freq=30 \
+    click_script='open "habittracker://open?view=log"' \
+    script="bash $PLUGIN_DIR/habits.sh" \
+  --subscribe habits habit_tracker_update system_woke \
+  --add bracket habits_pill habits \
+  --set habits_pill background.color=$PILL background.corner_radius=14 \
+    background.height=30 background.border_width=0
+
+# Added by palette init (undo: palette init --remove)
+[ -f "$HOME/.config/palette/current/sketchybar-item.sh" ] && source "$HOME/.config/palette/current/sketchybar-item.sh"
+sketchybar --update

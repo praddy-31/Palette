@@ -1,0 +1,15 @@
+# Palette: {{ theme }} (generated; merged after your own lazygit config)
+gui:
+  theme:
+    activeBorderColor: ["{{ accent }}", bold]
+    inactiveBorderColor: ["{{ muted }}"]
+    searchingActiveBorderColor: ["{{ yellow }}", bold]
+    optionsTextColor: ["{{ blue }}"]
+    selectedLineBgColor: ["{{ selection }}"]
+    inactiveViewSelectedLineBgColor: ["{{ lighter_background }}"]
+    cherryPickedCommitFgColor: ["{{ cyan }}"]
+    cherryPickedCommitBgColor: ["{{ selection }}"]
+    markedBaseCommitFgColor: ["{{ blue }}"]
+    markedBaseCommitBgColor: ["{{ selection }}"]
+    unstagedChangesColor: ["{{ red }}"]
+    defaultFgColor: ["{{ foreground }}"]

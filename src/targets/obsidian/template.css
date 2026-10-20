@@ -1,0 +1,152 @@
+/* Palette: {{ theme }} (generated; edits are overwritten on the next switch)
+   Colours only, on top of your Obsidian theme: fonts and layout stay yours.
+   !important so it also beats the accent colour set in Settings -> Appearance. */
+body, body.theme-dark, body.theme-light, .theme-dark, .theme-light {
+  --accent-h: {{ accent | hue }} !important;
+  --accent-s: {{ accent | sat }}% !important;
+  --accent-l: {{ accent | light }}% !important;
+  --color-accent: {{ accent }} !important;
+  --interactive-accent: {{ accent }} !important;
+  --interactive-accent-hover: {{ bright_blue }} !important;
+  --text-on-accent: {{ background }} !important;
+
+  --background-primary: {{ background }} !important;
+  --background-primary-alt: {{ dark_background }} !important;
+  --background-secondary: {{ dark_background }} !important;
+  --background-secondary-alt: {{ darker_background }} !important;
+  --background-modifier-border: {{ lighter_background }} !important;
+  --background-modifier-border-hover: {{ muted }} !important;
+  --background-modifier-border-focus: {{ accent }} !important;
+  --background-modifier-hover: {{ lighter_background }} !important;
+  --background-modifier-active-hover: {{ selection }} !important;
+  --background-modifier-form-field: {{ darker_background }} !important;
+  --titlebar-background: {{ dark_background }} !important;
+  --titlebar-background-focused: {{ dark_background }} !important;
+  --ribbon-background: {{ dark_background }} !important;
+  --tab-container-background: {{ dark_background }} !important;
+  --divider-color: {{ lighter_background }} !important;
+  --scrollbar-thumb-bg: {{ muted }} !important;
+  --scrollbar-active-thumb-bg: {{ dark_foreground }} !important;
+
+  --text-normal: {{ foreground }} !important;
+  --text-muted: {{ dark_foreground }} !important;
+  --text-faint: {{ muted }} !important;
+  --text-accent: {{ accent }} !important;
+  --text-accent-hover: {{ bright_blue }} !important;
+  --text-selection: {{ selection }} !important;
+  --text-highlight-bg: {{ yellow }}55 !important;
+  --text-error: {{ red }} !important;
+  --text-warning: {{ orange }} !important;
+  --text-success: {{ green }} !important;
+
+  --color-red: {{ red }} !important;
+  --color-orange: {{ orange }} !important;
+  --color-yellow: {{ yellow }} !important;
+  --color-green: {{ green }} !important;
+  --color-cyan: {{ cyan }} !important;
+  --color-blue: {{ blue }} !important;
+  --color-purple: {{ magenta }} !important;
+  --color-pink: {{ bright_magenta }} !important;
+
+  --h1-color: {{ family[0] }} !important;
+  --h2-color: {{ family[1] }} !important;
+  --h3-color: {{ family[2] }} !important;
+  --h4-color: {{ family[3] }} !important;
+  --h5-color: {{ family[4] }} !important;
+  --h6-color: {{ family[5] }} !important;
+  --link-color: {{ accent }} !important;
+  --link-color-hover: {{ bright_blue }} !important;
+  --link-external-color: {{ cyan }} !important;
+  --link-unresolved-color: {{ dark_foreground }} !important;
+  --tag-color: {{ accent }} !important;
+  --tag-background: {{ selection }} !important;
+  --checkbox-color: {{ accent }} !important;
+  --blockquote-border-color: {{ accent }} !important;
+  --hr-color: {{ lighter_background }} !important;
+
+  --code-background: {{ dark_background }} !important;
+  --code-normal: {{ foreground }} !important;
+  --code-comment: {{ dark_foreground }} !important;
+  --code-function: {{ blue }} !important;
+  --code-keyword: {{ magenta }} !important;
+  --code-string: {{ green }} !important;
+  --code-value: {{ orange }} !important;
+  --code-property: {{ cyan }} !important;
+  --code-operator: {{ cyan }} !important;
+  --code-tag: {{ red }} !important;
+  --code-punctuation: {{ dark_foreground }} !important;
+  --code-important: {{ yellow }} !important;
+
+  --graph-node: {{ dark_foreground }} !important;
+  --graph-node-focused: {{ accent }} !important;
+  --graph-node-tag: {{ green }} !important;
+  --graph-node-attachment: {{ yellow }} !important;
+  --graph-line: {{ muted }} !important;
+}
+
+/* Themes that set heading and link colours on the elements themselves (Catppuccin,
+   Minimal, …) beat the variables above, so restate them there. */
+.markdown-rendered h1, .HyperMD-header-1, .cm-header-1, .HyperMD-list-line .cm-header-1 { --h1-color: {{ family[0] }} !important; color: {{ family[0] }} !important; }
+.markdown-rendered h2, .HyperMD-header-2, .cm-header-2, .HyperMD-list-line .cm-header-2 { --h2-color: {{ family[1] }} !important; color: {{ family[1] }} !important; }
+.markdown-rendered h3, .HyperMD-header-3, .cm-header-3, .HyperMD-list-line .cm-header-3 { --h3-color: {{ family[2] }} !important; color: {{ family[2] }} !important; }
+.markdown-rendered h4, .HyperMD-header-4, .cm-header-4, .HyperMD-list-line .cm-header-4 { --h4-color: {{ family[3] }} !important; color: {{ family[3] }} !important; }
+.markdown-rendered h5, .HyperMD-header-5, .cm-header-5, .HyperMD-list-line .cm-header-5 { --h5-color: {{ family[4] }} !important; color: {{ family[4] }} !important; }
+.markdown-rendered h6, .HyperMD-header-6, .cm-header-6, .HyperMD-list-line .cm-header-6 { --h6-color: {{ family[5] }} !important; color: {{ family[5] }} !important; }
+/* Emphasis in colours that stand apart from the headings' family. */
+em, .cm-em, .markdown-rendered em { color: {{ pop }} !important; }
+strong, .cm-strong, .markdown-rendered strong { color: {{ pop2 }} !important; }
+.markdown-rendered mark, .cm-highlight { background-color: {{ pop }}40 !important; color: inherit !important; }
+.inline-title { --inline-title-color: {{ bright_foreground }} !important; color: {{ bright_foreground }} !important; }
+.markdown-rendered a.internal-link, .cm-s-obsidian .cm-hmd-internal-link, .cm-s-obsidian .cm-link,
+.cm-s-obsidian .cm-formatting-link.cm-link, .cm-s-obsidian .cm-formatting-link-start, .cm-s-obsidian .cm-formatting-link-end { color: {{ accent }} !important; }
+.markdown-rendered a.external-link, .cm-s-obsidian .cm-url, .cm-s-obsidian span.cm-url { color: {{ cyan }} !important; }
+.markdown-rendered a.is-unresolved, .cm-s-obsidian .is-unresolved .cm-hmd-internal-link { color: {{ dark_foreground }} !important; }
+
+/* Catppuccin builds every colour from these (as "r, g, b"): map its palette onto this
+   theme's, so the parts of Catppuccin not covered above follow along too. */
+body, body.theme-dark, body.theme-light, .theme-dark, .theme-light,
+.theme-light.ctp-latte, .theme-dark.ctp-frappe, .theme-dark.ctp-macchiato, .theme-dark.ctp-mocha {
+  --ctp-accent: {{ accent | rgb }} !important;
+  --ctp-rosewater: {{ bright_red | rgb }} !important;
+  --ctp-flamingo: {{ bright_red | rgb }} !important;
+  --ctp-pink: {{ bright_magenta | rgb }} !important;
+  --ctp-mauve: {{ magenta | rgb }} !important;
+  --ctp-red: {{ red | rgb }} !important;
+  --ctp-maroon: {{ bright_red | rgb }} !important;
+  --ctp-peach: {{ orange | rgb }} !important;
+  --ctp-yellow: {{ yellow | rgb }} !important;
+  --ctp-green: {{ green | rgb }} !important;
+  --ctp-teal: {{ cyan | rgb }} !important;
+  --ctp-sky: {{ bright_cyan | rgb }} !important;
+  --ctp-sapphire: {{ bright_blue | rgb }} !important;
+  --ctp-blue: {{ blue | rgb }} !important;
+  --ctp-lavender: {{ accent | rgb }} !important;
+  --ctp-text: {{ foreground | rgb }} !important;
+  --ctp-subtext1: {{ light_foreground | rgb }} !important;
+  --ctp-subtext0: {{ dark_foreground | rgb }} !important;
+  --ctp-overlay2: {{ dark_foreground | rgb }} !important;
+  --ctp-overlay1: {{ muted | rgb }} !important;
+  --ctp-overlay0: {{ muted | rgb }} !important;
+  --ctp-surface2: {{ selection | rgb }} !important;
+  --ctp-surface1: {{ lighter_background | rgb }} !important;
+  --ctp-surface0: {{ lighter_background | rgb }} !important;
+  --ctp-base: {{ background | rgb }} !important;
+  --ctp-mantle: {{ dark_background | rgb }} !important;
+  --ctp-crust: {{ darker_background | rgb }} !important;
+}
+
+/* Active pane, like JankyBorders around the focused window: only when the editor
+   is split (one pane needs no highlight). Drawn on an overlay, so nothing moves.
+   Settings: `palette obsidian` (focus ring, dim the others). */
+{%- set split = ".workspace-split.mod-root:has(.workspace-tabs ~ .workspace-tabs, .workspace-split ~ .workspace-split, .workspace-tabs ~ .workspace-split, .workspace-split ~ .workspace-tabs)" %}
+{%- if obsidian_ring %}
+{{ split }} .workspace-leaf { position: relative; }
+{{ split }} .workspace-leaf.mod-active::after {
+  content: ""; position: absolute; inset: 1px; pointer-events: none; z-index: 30;
+  border: 2px solid {{ accent }}; border-radius: 8px;
+}
+{%- endif %}
+{%- if obsidian_dim %}
+{{ split }} .workspace-leaf > .workspace-leaf-content { transition: opacity 120ms ease; }
+{{ split }} .workspace-leaf:not(.mod-active) > .workspace-leaf-content { opacity: 0.72; }
+{%- endif %}

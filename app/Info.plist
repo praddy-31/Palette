@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- A menu bar app, never in the Dock. macOS re-reads this whenever it hands a
+       palette:// link to the running app (the SketchyBar pill, scroll to switch);
+       without it, each link turned Palette into a Dock app. -->
+  <key>LSUIElement</key>
+  <true/>
+</dict>
+</plist>
