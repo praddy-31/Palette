@@ -171,8 +171,8 @@ cat <<EOF
      git push origin main v$version
 
 2. Create the GitHub release and upload the DMG, either:
-     gh release create v$version "$out" --repo praddy-31/palette --title "Palette $version" --notes "…"
-   or on the web: https://github.com/praddy-31/palette/releases/new
+     gh release create v$version "$out" --repo praddy-31/Palette --title "Palette $version" --notes "…"
+   or on the web: https://github.com/praddy-31/Palette/releases/new
      (tag v$version, attach $out; the file name must stay Palette-$version-arm64.dmg)
 
 3. Update the cask in the tap:
