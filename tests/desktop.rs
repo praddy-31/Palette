@@ -9,6 +9,20 @@ const RC: &str = include_str!("fixtures/sketchybarrc-owner");
 const AEROSPACE: &str = include_str!("fixtures/aerospace-owner.toml");
 const BORDERS: &str = "#!/bin/bash\noptions=(\n  style=round\n  width=6.0\n  hidpi=on\n)\nborders \"${options[@]}\"\n";
 
+/// The overview line for one tool, minus the install part: "yours" or
+/// "not installed" depends on what the machine running the tests has.
+fn overview(home: &Home, tool: &str) -> String {
+    let out = home.ok(&["desktop"]);
+    let line = out
+        .lines()
+        .find(|l| l.split_whitespace().next() == Some(tool))
+        .unwrap_or_else(|| panic!("no {tool} line in:\n{out}"));
+    match line.contains("managed by Palette") {
+        true => "managed".into(),
+        false => "not managed".into(),
+    }
+}
+
 fn home() -> Home {
     let home = Home::new();
     home.write(".config/sketchybar/sketchybarrc", RC);
@@ -25,10 +39,7 @@ fn shows_without_writing_anything() {
     assert!(out.contains("workspaces = 6"), "{out}");
     assert!(out.contains("doesn't manage AeroSpace yet"));
     assert_eq!(home.read(".aerospace.toml"), AEROSPACE);
-    assert!(
-        home.ok(&["desktop"])
-            .contains("windows  AeroSpace     yours")
-    );
+    assert_eq!(overview(&home, "windows"), "not managed");
 }
 
 #[test]
@@ -41,10 +52,7 @@ fn manage_change_and_give_back() {
         rc.contains("width=3.0") && rc.contains("style=square"),
         "{rc}"
     );
-    assert!(
-        home.ok(&["desktop"])
-            .contains("borders  JankyBorders  managed by Palette")
-    );
+    assert_eq!(overview(&home, "borders"), "managed");
     assert!(
         home.fails(&["desktop", "borders", "set", "width=99"])
             .contains("width is 1 to 20")
@@ -58,10 +66,7 @@ fn manage_change_and_give_back() {
 
     home.ok(&["desktop", "borders", "release"]);
     assert_eq!(home.read(".config/borders/bordersrc"), BORDERS);
-    assert!(
-        home.ok(&["desktop"])
-            .contains("borders  JankyBorders  yours")
-    );
+    assert_eq!(overview(&home, "borders"), "not managed");
 }
 
 #[test]
