@@ -324,7 +324,8 @@ impl Item {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Pill {
-    /// `left` or `right` of the notch.
+    /// `left`, `center` or `right`. Centre pills sit in the middle of the screen
+    /// (behind the notch on a MacBook screen that has one).
     pub side: String,
     /// Left to right, as you see them.
     pub items: Vec<Item>,
@@ -445,6 +446,128 @@ impl Default for Bar {
     }
 }
 
+/// Where [`Bar::move_pill`] puts a pill.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Place {
+    /// At the end of `left`, `center` or `right`.
+    End(String),
+    /// Just before this pill (an index into `pills`), on its side.
+    Before(usize),
+    /// One place right (1) or left (-1) on screen; at the end of its side it
+    /// moves into the next side (left, centre, right) without passing a pill.
+    Step(i32),
+}
+
+impl std::str::FromStr for Place {
+    type Err = anyhow::Error;
+    /// `left`, `center` (or `centre`), `right`, `next` (one place right), `prev`.
+    fn from_str(s: &str) -> Result<Self> {
+        Ok(match s {
+            "next" => Place::Step(1),
+            "prev" => Place::Step(-1),
+            "centre" => Place::End("center".into()),
+            s if SIDES.contains(&s) => Place::End(s.into()),
+            _ => bail!("`{s}`: say left, center, right, next or prev"),
+        })
+    }
+}
+
+impl Bar {
+    /// Indexes into `pills` in the order they appear on screen: the left
+    /// pills, the centre ones, then the right ones.
+    pub fn screen_order(&self) -> Vec<usize> {
+        SIDES
+            .iter()
+            .flat_map(|side| (0..self.pills.len()).filter(move |&i| self.pills[i].side == *side))
+            .collect()
+    }
+
+    /// The pill `what` names: its number on screen (1 is the leftmost, as
+    /// `palette desktop bar pills` lists them) or an item it holds (`habits`).
+    pub fn find_pill(&self, what: &str) -> Result<usize> {
+        let order = self.screen_order();
+        if let Ok(n) = what.parse::<usize>() {
+            return match order.get(n.wrapping_sub(1)) {
+                Some(&i) => Ok(i),
+                None => bail!("there are {} pills; {n} isn't one", order.len()),
+            };
+        }
+        let found: Vec<usize> = order
+            .into_iter()
+            .filter(|&i| self.pills[i].items.iter().any(|it| it.kind == what))
+            .collect();
+        match found[..] {
+            [i] => Ok(i),
+            [] => bail!("no pill holds `{what}` (see palette desktop bar pills)"),
+            _ => {
+                bail!("several pills hold `{what}`: use its number from palette desktop bar pills")
+            }
+        }
+    }
+
+    /// Move pill `from` (an index into `pills`); returns where it ended up.
+    pub fn move_pill(&mut self, from: usize, to: Place) -> Result<usize> {
+        if from >= self.pills.len() {
+            bail!("there is no pill {from}");
+        }
+        let side = self.pills[from].side.clone();
+        let (side, before) = match to {
+            Place::End(side) => {
+                if !SIDES.contains(&side.as_str()) {
+                    bail!("a pill's side is left, center or right");
+                }
+                (side, None)
+            }
+            Place::Before(i) => {
+                if i >= self.pills.len() {
+                    bail!("there is no pill {i}");
+                }
+                if i == from {
+                    return Ok(from);
+                }
+                (self.pills[i].side.clone(), Some(i))
+            }
+            Place::Step(by) => {
+                let mine: Vec<usize> = (0..self.pills.len())
+                    .filter(|&i| self.pills[i].side == side)
+                    .collect();
+                let at = mine.iter().position(|&i| i == from).unwrap_or(0) as i32;
+                if let Some(&next) = usize::try_from(at + by).ok().and_then(|j| mine.get(j)) {
+                    self.pills.swap(from, next);
+                    return Ok(next);
+                }
+                let s = SIDES.iter().position(|s| *s == side).unwrap_or(0) as i32 + by;
+                let Some(next) = usize::try_from(s).ok().and_then(|s| SIDES.get(s)) else {
+                    return Ok(from); // already at the screen's edge
+                };
+                // The next side's near end: its first pill going right, its last going left.
+                let first = self.pills.iter().position(|p| p.side == *next);
+                (next.to_string(), if by > 0 { first } else { None })
+            }
+        };
+        let target = before.map(|i| (self.pills[i].clone(), i));
+        let mut pill = self.pills.remove(from);
+        pill.side = side.clone();
+        let to = match target {
+            // The target slid down one if the moved pill was above it.
+            Some((_, i)) => i - usize::from(from < i),
+            None => match self.pills.iter().rposition(|p| p.side == side) {
+                Some(last) => last + 1,
+                // An empty side: after the sides before it, so the file reads left to right.
+                None => {
+                    let later = &SIDES[SIDES.iter().position(|s| *s == side).unwrap_or(0) + 1..];
+                    self.pills
+                        .iter()
+                        .position(|p| later.contains(&p.side.as_str()))
+                        .unwrap_or(self.pills.len())
+                }
+            },
+        };
+        self.pills.insert(to, pill);
+        Ok(to)
+    }
+}
+
 impl Bar {
     pub fn validate(&self) -> Result<()> {
         if !["top", "bottom"].contains(&self.position.as_str()) {
@@ -494,8 +617,8 @@ impl Bar {
         }
         let mut seen = Vec::new();
         for pill in &self.pills {
-            if !["left", "right"].contains(&pill.side.as_str()) {
-                bail!("a pill's side is left or right");
+            if !SIDES.contains(&pill.side.as_str()) {
+                bail!("a pill's side is left, center or right");
             }
             for item in &pill.items {
                 let Some(kind) = find_kind(&item.kind) else {
@@ -649,7 +772,7 @@ pub fn render(paths: &Paths, bar: &Bar) -> Result<Vec<File>> {
     // on its side, or before the next pill's gap when it comes first.
     let mut want_palette: Option<(&str, Anchor)> = None;
 
-    for side in ["left", "right"] {
+    for side in SIDES {
         // Right-hand items are added right to left.
         let mut pills: Vec<&Pill> = bar.pills.iter().filter(|p| p.side == side).collect();
         if side == "right" {
@@ -952,6 +1075,10 @@ pub fn render(paths: &Paths, bar: &Bar) -> Result<Vec<File>> {
     Ok(files)
 }
 
+/// Where a pill can sit, in SketchyBar's words. Left and centre items are
+/// added left to right, right items right to left.
+const SIDES: [&str; 3] = ["left", "center", "right"];
+
 /// Where the theme pill goes among the bar's items.
 enum Anchor {
     After(String),
@@ -1147,6 +1274,9 @@ pub fn import(paths: &Paths) -> (Bar, Vec<String>) {
         }
         if pill_items.is_empty() {
             continue;
+        }
+        if !SIDES.contains(&side.as_str()) {
+            side = "left".into();
         }
         let pill = Pill {
             side: side.clone(),

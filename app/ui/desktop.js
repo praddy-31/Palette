@@ -666,13 +666,14 @@ const desktop = {
     const t = "bar";
     const m = this.model.bar;
     const palettePill = m.pills.some((p) => p.items.some((i) => i.kind === "palette"));
-    const addSide = (side) => this.btn(`New pill on the ${side}`, () => {
+    const addSide = (side, label) => this.btn(label, () => {
       m.pills.push({ side, items: [] });
       this.changed(t);
     });
     return [
       el("div", { class: "dk-bar-wrap" }, el("div", { class: "dk-bar", id: "dk-bar-preview" })),
-      el("div", { class: "actions" }, addSide("left"), addSide("right"),
+      el("p", { class: "note" }, "To move a whole pill, click one of its items and use Pill ◀ ▶: it walks left → centre → right. Centre pills sit in the middle of the screen: behind the notch on a MacBook screen that has one."),
+      el("div", { class: "actions" }, addSide("left", "New pill on the left"), addSide("center", "New pill in the centre"), addSide("right", "New pill on the right"),
         el("span", { class: "spacer" }),
         el("label", { class: "dk-inline" }, "Palette's theme pill ", this.paletteToggle(palettePill))),
       el("div", { id: "dk-item" }),
@@ -756,8 +757,9 @@ const desktop = {
     const c = activeColours();
     box.style.background = m.background ? c[m.background] : "transparent";
     box.style.borderRadius = `${m.corner_radius}px`;
-    const side = (s) => el("div", { class: "dk-side" }, ...m.pills.map((p, pi) => [p, pi]).filter(([p]) => p.side === s).map(([p, pi]) => this.pill(p, pi, c)));
-    box.replaceChildren(side("left"), el("span", { class: "spacer" }), side("right"));
+    const side = (s) => el("div", { class: `dk-side ${s}`, title: s === "center" ? "Centre" : "" },
+      ...m.pills.map((p, pi) => [p, pi]).filter(([p]) => p.side === s).map(([p, pi]) => this.pill(p, pi, c)));
+    box.replaceChildren(side("left"), el("span", { class: "spacer" }), side("center"), el("span", { class: "spacer" }), side("right"));
     // A screen-wide bar in a narrower pane: shrink it to fit, like a miniature.
     const wrap = box.parentElement;
     const scale = Math.min(1, (wrap.clientWidth - 20) / box.scrollWidth);
@@ -773,6 +775,7 @@ const desktop = {
       class: `dk-pill${fixed ? " fixed" : ""}`,
       style: { background: `color-mix(in srgb, ${c[m.pill.colour]} ${m.pill.opacity}%, transparent)`, borderRadius: `${Math.min(m.pill.corner_radius, 14)}px`, border: m.pill.border_width ? `${m.pill.border_width}px solid ${c[m.pill.border_colour]}` : "none" },
     });
+    // An item dropped here goes to the end of this pill. Whole pills move with Pill ◀ ▶.
     if (!fixed) {
       pill.addEventListener("dragover", (e) => { e.preventDefault(); pill.classList.add("over"); });
       pill.addEventListener("dragleave", () => pill.classList.remove("over"));
@@ -812,32 +815,22 @@ const desktop = {
     return chip;
   },
 
-  /** The theme pill (a pill of its own) one place left or right, across sides too. */
+  /** The selected pill one place left or right; at the end of its side it moves
+   *  to the next side (left, centre, right). The core does the moving. */
   movePill(by) {
-    const m = this.model.bar;
-    const order = [...m.pills.map((p, i) => [p, i]).filter(([p]) => p.side === "left"), ...m.pills.map((p, i) => [p, i]).filter(([p]) => p.side === "right")];
-    const at = order.findIndex(([, i]) => i === this.sel.p);
-    const pill = m.pills[this.sel.p];
-    const lefts = order.filter(([p]) => p.side === "left").length;
-    // Crossing the middle changes side first, without passing a pill.
-    const cross = (by > 0 && pill.side === "left" && at === lefts - 1) || (by < 0 && pill.side === "right" && at === lefts);
-    if (cross) {
-      // Next to the middle: before the first right pill, or after the last left one.
-      m.pills.splice(this.sel.p, 1);
-      pill.side = pill.side === "left" ? "right" : "left";
-      const firstRight = m.pills.findIndex((p) => p.side === "right");
-      const lastLeft = m.pills.map((p) => p.side).lastIndexOf("left");
-      const to = pill.side === "right" ? (firstRight < 0 ? m.pills.length : firstRight) : lastLeft + 1;
-      m.pills.splice(to, 0, pill);
-      this.sel = { p: to, i: 0 };
-    } else {
-      const j = at + by;
-      if (j < 0 || j >= order.length || order[j][0].side !== pill.side) return;
-      const [a, b] = [order[at][1], order[j][1]];
-      [m.pills[a], m.pills[b]] = [m.pills[b], m.pills[a]];
-      this.sel = { p: b, i: 0 };
-    }
-    this.changed("bar");
+    this.placePill(this.sel.p, { to: by > 0 ? "next" : "prev" });
+  },
+
+  /** Move pill `from` with the core's `Bar::move_pill` (same as `palette desktop bar move`). */
+  async placePill(from, where) {
+    const keep = this.sel?.p === from ? this.sel.i : null;
+    try {
+      const [bar, at] = await invoke("bar_move_pill", { settings: this.model.bar, from, to: where.to ?? null, before: where.before ?? null });
+      // Only the pills change; keep the same model object, which the page's controls hold.
+      this.model.bar.pills = bar.pills;
+      this.sel = keep != null ? { p: at, i: keep } : null;
+      this.changed("bar");
+    } catch (e) { toast(String(e), true); }
   },
 
   workspaceCount() {
@@ -951,8 +944,12 @@ const desktop = {
     }, "btn danger");
     box.replaceChildren(el("div", { class: "dk-item" },
       el("div", { class: "dk-item-h" }, el("b", {}, k.name), el("span", { class: "sub" }, k.what), el("span", { class: "spacer" }),
-        this.btn("◀", () => (item.kind === "palette" ? this.movePill(-1) : move(-1))),
-        this.btn("▶", () => (item.kind === "palette" ? this.movePill(1) : move(1))),
+        item.kind === "palette" ? null : el("span", { class: "sub" }, "Item"),
+        item.kind === "palette" ? null : this.btn("◀", () => move(-1)),
+        item.kind === "palette" ? null : this.btn("▶", () => move(1)),
+        el("span", { class: "sub" }, "Pill"),
+        this.btn("◀", () => this.movePill(-1)),
+        this.btn("▶", () => this.movePill(1)),
         item.kind === "palette" ? null : remove),
       ...rows));
   },

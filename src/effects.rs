@@ -211,6 +211,20 @@ pub fn set_wallpaper(paths: &Paths, image: &std::path::Path) -> Result<Outcome> 
     Ok(outcome)
 }
 
+/// Set the wallpaper Palette last set again, on every display: macOS keeps one
+/// per display, so one that was unplugged during a switch still shows the old
+/// theme's. The app calls this when a display is connected (`palette bg again`
+/// by hand).
+pub fn reapply_wallpaper(paths: &Paths) -> Result<Outcome> {
+    match current_wallpaper(paths) {
+        Some(image) if image.is_file() => set_wallpaper(paths, &image),
+        Some(image) => Ok(Outcome::Skipped(format!("{} is gone", image.display()))),
+        None => Ok(Outcome::Unchanged(
+            "Palette hasn't set a wallpaper yet".into(),
+        )),
+    }
+}
+
 /// `palette bg next` / `prev`: the theme's next (`by` = 1) or previous (-1)
 /// wallpaper, wrapping around.
 pub fn step_wallpaper(paths: &Paths, theme: &Theme, by: isize) -> Result<Outcome> {

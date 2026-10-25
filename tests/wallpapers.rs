@@ -82,3 +82,17 @@ fn wallpaper_off_leaves_it_alone() {
     home.ok(&["set", "nord"]);
     assert_eq!(current(&home), "a.png");
 }
+
+#[test]
+fn again_sets_the_current_wallpaper_once_more() {
+    let home = nord();
+    assert!(
+        home.ok(&["bg", "again"])
+            .contains("hasn't set a wallpaper yet")
+    );
+    home.ok(&["set", "nord"]);
+    home.ok(&["bg", "next"]);
+    let out = home.ok(&["bg", "again"]);
+    assert!(out.contains("b.png") && out.contains("fake home"), "{out}");
+    assert_eq!(current(&home), "b.png");
+}

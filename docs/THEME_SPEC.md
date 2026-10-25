@@ -137,7 +137,7 @@ Filters:
     sketchybar.sh  borders.sh  ghostty.conf  kitty.conf  alacritty.toml
     tmux.conf  vscodium.json  neovim.lua  btop.theme  shell.sh
     starship.toml  fzf.opts  lazygit.yml  sketchybar-item.sh  obsidian.css
-    habit-tracker.json
+    habit-tracker.json  chess-review.json
   themes/<name>/                  # user themes (or wallpapers for bundled ones)
   backup/<UTC time>/              # originals saved by `palette init` (last 5 kept)
   wiring/<target>.previous        # settings `init` changed (btop, VSCodium), for --remove

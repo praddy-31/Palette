@@ -1,7 +1,7 @@
 /target
 /tmp
 .DS_Store
-.claude/
+.claude/settings.local.json
 # Tauri: generated schemas, and icon sizes for platforms Palette doesn't ship
 /app/gen
 /app/icons/android
@@ -13,14 +13,10 @@
 /app/binaries
 /dist
 *.dmg
+/.claude/worktrees/
 
-# Local only: owner notes, personal docs, files waiting to be deleted
-CLAUDE.md
-CLAUDE.local.md
-/docs/ROADMAP.md
-/docs/DECISIONS.md
-/docs/IDEAS.md
-/docs/user_test.md
-/docs/CONFIG_INVENTORY.md
-/docs/PUBLISHING.md
+# Files waiting to be deleted (the owner empties it)
 /to_delete/
+
+# Private docs and Claude Code files ARE committed, on the `private` branch.
+# Releases leave them out: see .publishignore and ~/.claude/skills/project-docs/publish.sh

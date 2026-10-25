@@ -51,8 +51,9 @@ Command-line tools
 Apps
 
 - Habit Tracker (a colours file the app can follow)
+- Chess Review (a colours file the app can follow)
 
-That is 18 targets in the code (`src/targets/`). `palette doctor` shows which ones are
+That is 19 targets in the code (`src/targets/`). `palette doctor` shows which ones are
 installed on your Mac and which are wired. You can switch any of them off with
 `palette apps off <name>` or in Settings. 23 themes are bundled, and
 `palette catalog` lists more community themes.
@@ -170,7 +171,8 @@ palette init --remove     # takes Palette's lines back out
   backed up first, and **Give it back** restores yours. The Prompt page edits only the
   keys it shows in `starship.toml`; the Dock & menu bar page changes macOS settings, and
   switching an option back undoes it. Same from the terminal: `palette desktop`,
-  `palette desktop bar manage`, `palette desktop bar release`.
+  `palette desktop bar manage`, `palette desktop bar release`, and `palette desktop bar pills`
+  / `move habits center` to move whole pills (left, centre or right).
 - **Get the tools.** `palette tools` shows which of SketchyBar, JankyBorders, AeroSpace and
   gowall are installed and prints the Homebrew commands (it never runs Homebrew).
   `palette tools starter <tool>` writes a small themed config for a tool that has none.

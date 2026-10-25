@@ -4,6 +4,7 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+pub mod displays;
 pub mod fonts;
 
 /// Result of a side effect, for the report printed after a switch.
