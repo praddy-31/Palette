@@ -312,6 +312,21 @@ enum DesktopCommand {
         #[arg(default_value = "1")]
         which: String,
     },
+    /// bar: the pills, numbered left to right as on screen
+    Pills,
+    /// bar: move a whole pill, e.g. `move habits center`, `move workspaces prev`,
+    /// `move palette --before habits`
+    Move {
+        /// Its number from `pills`, or an item it holds (`habits`, `clock`)
+        pill: String,
+        /// `left`, `center` or `right` (to that side's end), or `next` / `prev`
+        /// (one place right / left, into the next side at an end)
+        #[arg(required_unless_present = "before", conflicts_with = "before")]
+        to: Option<String>,
+        /// Just before this pill instead (number or item), on its side
+        #[arg(long)]
+        before: Option<String>,
+    },
     /// windows: a keyboard shortcut, e.g. `bind alt-enter exec-and-forget open -a Ghostty`
     Bind {
         key: String,
@@ -371,6 +386,9 @@ enum BgCommand {
     Next,
     /// Switch to the active theme's previous wallpaper
     Prev,
+    /// Set the current wallpaper again on every display (for a display that
+    /// was unplugged during a switch; the app does this by itself)
+    Again,
     /// The wallpaper a theme starts with (instead of its first)
     Default {
         /// Name as `bg list` shows it; leave out with --clear
@@ -860,6 +878,29 @@ fn desktop(paths: &Paths, tool: Option<&str>, command: Option<DesktopCommand>) -
                 Ok(())
             })?
         }
+        Some(DesktopCommand::Pills) => {
+            let bar = bar_settings(paths, tool)?;
+            for (n, &i) in bar.screen_order().iter().enumerate() {
+                let p = &bar.pills[i];
+                let items: Vec<&str> = p.items.iter().map(|it| it.kind.as_str()).collect();
+                println!("{:>2}  {:<7} {}", n + 1, p.side, items.join(" "));
+            }
+            println!(
+                "Move one: palette desktop bar move <number or item> left|center|right|next|prev"
+            );
+            return Ok(());
+        }
+        Some(DesktopCommand::Move { pill, to, before }) => {
+            let mut bar = bar_settings(paths, tool)?;
+            let from = bar.find_pill(&pill)?;
+            let place = match (to, before) {
+                (_, Some(b)) => desktop::bar::Place::Before(bar.find_pill(&b)?),
+                (Some(to), None) => to.parse()?,
+                (None, None) => unreachable!("clap requires one"),
+            };
+            bar.move_pill(from, place)?;
+            desktop::set(paths, tool, toml::Value::try_from(&bar)?)?
+        }
         Some(DesktopCommand::Unbind { key, mode }) => bind(paths, tool, |list| {
             let before = list.len();
             list.retain(|s| !(s.mode == mode && s.key == key));
@@ -925,6 +966,15 @@ fn ansi(s: &palette::desktop::prompt::Span) -> String {
 }
 
 /// Change the windows shortcuts list, then save it like any setting.
+/// The bar's saved settings, for the pill commands.
+fn bar_settings(paths: &Paths, tool: palette::desktop::Tool) -> Result<palette::desktop::bar::Bar> {
+    use palette::desktop::{self, Tool};
+    if tool != Tool::Bar {
+        bail!("pills are the bar's: palette desktop bar pills / move …");
+    }
+    Ok(desktop::get(paths, tool)?.try_into()?)
+}
+
 fn bind(
     paths: &Paths,
     tool: palette::desktop::Tool,
@@ -1401,6 +1451,9 @@ fn bg(paths: &Paths, command: BgCommand) -> Result<()> {
                 "wallpaper".into(),
                 effects::step_wallpaper(paths, &theme, by)?,
             )]);
+        }
+        BgCommand::Again => {
+            print_effects(&[("wallpaper".into(), effects::reapply_wallpaper(paths)?)]);
         }
         BgCommand::Default { name, clear, theme } => {
             let theme = match theme {

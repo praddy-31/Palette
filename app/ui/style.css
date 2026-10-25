@@ -253,10 +253,14 @@ body.window .toast { position: fixed; bottom: 18px; left: 26px; right: 26px; }
 /* Settings wallpaper tiles: ★ = the one the theme starts with */
 .wp .star {
   position: absolute; top: 5px; left: 5px; width: 22px; height: 22px; border-radius: 50%; border: 0;
-  background: rgb(0 0 0 / .6); color: #fff; font-size: 12px; line-height: 22px; padding: 0; display: none;
+  background: rgb(0 0 0 / .6); color: #fff; font-size: 12px; line-height: 22px; padding: 0; opacity: .7;
 }
-.wp:hover .star, .wp .star.on { display: block; }
+/* Always shown, so the star is found without hovering; brighter on hover or when on */
+.wp:hover .star, .wp .star.on { opacity: 1; }
 .wp .star.on { color: #ffd84d; }
+/* Picker footer: ★ for the wallpaper on screen */
+.bottom .btn.wstar { width: 28px; padding: 0; font-size: 14px; }
+.bottom .btn.wstar.on { color: #f5c542; }
 
 /* Welcome tour */
 .steps { display: flex; gap: 6px; margin: 2px 0 18px; }
@@ -516,6 +520,8 @@ body.window .toast { position: fixed; bottom: 18px; left: 26px; right: 26px; }
 .dk-side { display: flex; gap: 6px; align-items: center; }
 .dk-pill { display: flex; align-items: center; gap: 2px; padding: 3px 6px; min-height: 30px; min-width: 30px; }
 .dk-pill.over { outline: 2px dashed var(--accent); }
+.dk-side { min-width: 40px; min-height: 34px; border-radius: 10px; }
+.dk-side.center:empty { outline: 1px dashed color-mix(in srgb, var(--fg) 18%, transparent); }
 .dk-pill.fixed { opacity: .85; }
 .dk-it { display: inline-flex; align-items: center; gap: 4px; padding: 3px 4px; border-radius: 7px; font: 600 11.5px var(--mono); white-space: nowrap; cursor: grab; }
 .dk-it b { width: 7px; height: 7px; border-radius: 2px; }

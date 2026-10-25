@@ -256,6 +256,24 @@ const picker = {
       ? `${at >= 0 ? w.images[at].name : ""}\nClick: all of ${w.theme}'s wallpapers (Settings)`
       : "Add some in Settings → Wallpapers";
     $("#wp-prev").disabled = $("#wp-next").disabled = n < 2;
+    // ★ = the wallpaper on screen is the one this theme starts with.
+    const shown = at >= 0 ? w.images[at] : null;
+    const star = $("#wp-star");
+    star.disabled = !shown;
+    star.textContent = shown?.default ? "★" : "☆";
+    star.classList.toggle("on", !!shown?.default);
+    star.title = !shown ? "No wallpaper of this theme on screen"
+      : shown.default ? `${w.theme} starts with this wallpaper (click: back to the first)`
+      : `Start ${w.theme} with this wallpaper`;
+    star.onclick = () => shown && this.starWall(w.theme, shown);
+  },
+
+  async starWall(theme, img) {
+    try {
+      await invoke("set_default_wallpaper", { theme, name: img.default ? null : img.name });
+      toast(img.default ? `${theme} starts with its first wallpaper again` : `★ ${theme} now starts with ${img.name}`);
+    } catch (e) { toast(String(e), true); }
+    this.renderWall();
   },
 
   async stepWall(by) {
@@ -524,13 +542,14 @@ const LABELS = {
   shell: ["Shell", "Loads fzf, bat, starship, lazygit colours in new terminals"],
   starship: ["Starship"], fzf: ["fzf"], bat: ["bat"], lazygit: ["lazygit"],
   "habit-tracker": ["Habit Tracker", "Colours file the app follows (turn on in its Settings → Integrations)"],
+  "chess-review": ["Chess Review", "Colours file the app follows (turn on in its Settings → Appearance)"],
 };
 const GROUPS = [
   ["Desktop", ["sketchybar", "sketchybar-item", "borders", "wallpaper", "appearance"]],
   ["Terminals", ["ghostty", "kitty", "alacritty", "wezterm", "tmux"]],
   ["Editors", ["vscodium", "neovim", "obsidian"]],
   ["Command-line tools", ["shell", "starship", "fzf", "bat", "lazygit", "btop"]],
-  ["Apps", ["habit-tracker"]],
+  ["Apps", ["habit-tracker", "chess-review"]],
 ];
 
 // ---------------------------------------------------------------- welcome tour

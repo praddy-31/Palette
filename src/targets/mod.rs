@@ -9,6 +9,7 @@ mod alacritty;
 mod bat;
 mod borders;
 mod btop;
+mod chess_review;
 mod fzf;
 mod ghostty;
 mod habit_tracker;
@@ -130,6 +131,7 @@ pub const ALL: &[Target] = &[
     bat::TARGET,
     lazygit::TARGET,
     habit_tracker::TARGET,
+    chess_review::TARGET,
     wezterm::TARGET,
 ];
 

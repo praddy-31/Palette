@@ -1997,6 +1997,27 @@ fn aerospace_commands() -> &'static [(&'static str, &'static str)] {
     palette::desktop::windows::COMMANDS
 }
 
+/// Move a whole pill in the bar being edited (not saved: Apply saves). `to` is
+/// left/center/right/next/prev, or `before` another pill's index. Returns the
+/// settings and the pill's new index.
+#[tauri::command]
+fn bar_move_pill(
+    settings: serde_json::Value,
+    from: usize,
+    to: Option<String>,
+    before: Option<usize>,
+) -> Result<(serde_json::Value, usize), String> {
+    use palette::desktop::bar::{Bar, Place};
+    let mut bar: Bar = serde_json::from_value(settings).map_err(err)?;
+    let place = match (before, to) {
+        (Some(i), _) => Place::Before(i),
+        (None, Some(to)) => to.parse().map_err(err)?,
+        (None, None) => return Err("say where the pill goes".into()),
+    };
+    let at = bar.move_pill(from, place).map_err(err)?;
+    Ok((serde_json::to_value(&bar).map_err(err)?, at))
+}
+
 /// What can go in a bar pill.
 #[tauri::command]
 fn bar_kinds() -> &'static [palette::desktop::bar::Kind] {
@@ -2213,6 +2234,7 @@ fn main() {
             prompt_presets,
             prompt_preset,
             bar_kinds,
+            bar_move_pill,
             running_apps,
             import_dialog,
             import_apply,
@@ -2359,6 +2381,15 @@ fn main() {
                 loop {
                     schedule_tick(&ticker);
                     std::thread::sleep(until_next_minute());
+                }
+            });
+
+            // A display plugged in (or switched back on) keeps the wallpaper it
+            // had when it was last connected; give it the current one.
+            palette::system::displays::on_added(|| {
+                let Ok(paths) = paths() else { return };
+                if let Ok(Outcome::Failed(e)) = palette::effects::reapply_wallpaper(&paths) {
+                    eprintln!("palette: wallpaper on the new display: {e}");
                 }
             });
 

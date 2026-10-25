@@ -171,3 +171,35 @@ fn the_prompt_changes_key_by_key_and_comes_back() {
     home.ok(&["desktop", "prompt", "release"]);
     assert_eq!(home.read(".config/starship.toml"), STARSHIP);
 }
+
+#[test]
+fn pills_move_from_the_command_line() {
+    let home = home();
+    home.ok(&["desktop", "bar", "manage"]);
+    let pills = home.ok(&["desktop", "bar", "pills"]);
+    assert!(pills.contains(" 1  left    workspaces"), "{pills}");
+    home.ok(&["desktop", "bar", "move", "habits", "center"]);
+    home.ok(&["desktop", "bar", "move", "palette", "--before", "habits"]);
+    let pills = home.ok(&["desktop", "bar", "pills"]);
+    let center: Vec<&str> = pills.lines().filter(|l| l.contains(" center ")).collect();
+    assert_eq!(center.len(), 2, "{pills}");
+    assert!(
+        center[0].ends_with("palette") && center[1].ends_with("habits"),
+        "{pills}"
+    );
+    // Written to the bar, and kept in the saved settings.
+    let rc = home.read(".config/sketchybar/sketchybarrc");
+    assert!(rc.contains("--add item habits center"), "{rc}");
+    assert!(
+        home.read(".config/palette/desktop/bar.toml")
+            .contains("side = \"center\"")
+    );
+    assert!(
+        home.fails(&["desktop", "bar", "move", "nope", "left"])
+            .contains("no pill holds")
+    );
+    assert!(
+        home.fails(&["desktop", "windows", "pills"])
+            .contains("the bar's")
+    );
+}

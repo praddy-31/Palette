@@ -261,3 +261,94 @@ fn workspaces_follow_their_display() {
     assert!(text.contains("ALL_DISPLAYS=0"), "{text}");
     assert!(text.contains("front_app_switched display_change"), "{text}");
 }
+
+#[test]
+fn pills_can_sit_in_the_centre() {
+    let (_h, paths) = home(None);
+    let mut bar = Bar::default();
+    // The habits pill and the theme pill move to the centre, habits first.
+    for p in bar.pills.iter_mut() {
+        if p.items
+            .iter()
+            .any(|i| i.kind == "habits" || i.kind == "palette")
+        {
+            p.side = "center".into();
+        }
+    }
+    let at = |bar: &Bar, kind: &str| {
+        bar.pills
+            .iter()
+            .position(|p| p.items.iter().any(|i| i.kind == kind))
+            .unwrap()
+    };
+    let palette = bar.pills.remove(at(&bar, "palette"));
+    bar.pills.insert(at(&bar, "habits") + 1, palette);
+    bar.validate().unwrap();
+    let rc = render(&paths, &bar).unwrap().remove(0).text;
+    assert!(rc.contains("--add item habits center"), "{rc}");
+    assert!(rc.contains("pill pill.center.0 habits"), "{rc}");
+    assert!(rc.contains("--set palette position=center"), "{rc}");
+    assert!(rc.contains("--move palette after palette_gap"), "{rc}");
+    bar.pills[0].side = "middle".into();
+    assert!(bar.validate().is_err());
+}
+
+#[test]
+fn pills_move_as_a_whole() {
+    // Default, on screen: 1 workspaces, 2 stats | 3 palette, 4 habits, 5 weather…
+    let sides = |bar: &Bar| {
+        bar.screen_order()
+            .iter()
+            .map(|&i| format!("{}:{}", &bar.pills[i].side[..1], bar.pills[i].items[0].kind))
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    let mut bar = Bar::default();
+    assert_eq!(
+        sides(&bar),
+        "l:workspaces l:cpu r:palette r:habits r:weather"
+    );
+    assert_eq!(bar.find_pill("2").unwrap(), bar.find_pill("cpu").unwrap());
+    assert!(bar.find_pill("9").is_err() && bar.find_pill("nope").is_err());
+
+    // Workspaces before the stats: one step right swaps them.
+    let i = bar.find_pill("workspaces").unwrap();
+    bar.move_pill(i, Place::Step(1)).unwrap();
+    assert_eq!(
+        sides(&bar),
+        "l:cpu l:workspaces r:palette r:habits r:weather"
+    );
+    // At the end of the left, the next step goes into the (empty) centre.
+    let i = bar.find_pill("workspaces").unwrap();
+    bar.move_pill(i, "next".parse().unwrap()).unwrap();
+    assert_eq!(
+        sides(&bar),
+        "l:cpu c:workspaces r:palette r:habits r:weather"
+    );
+    // Habits to the centre's end, then the theme pill before it.
+    let i = bar.find_pill("habits").unwrap();
+    bar.move_pill(i, "centre".parse().unwrap()).unwrap();
+    let (p, h) = (
+        bar.find_pill("palette").unwrap(),
+        bar.find_pill("habits").unwrap(),
+    );
+    bar.move_pill(p, Place::Before(h)).unwrap();
+    assert_eq!(
+        sides(&bar),
+        "l:cpu c:workspaces c:palette c:habits r:weather"
+    );
+    // Stepping left from the centre's first goes to the left's end.
+    let i = bar.find_pill("workspaces").unwrap();
+    bar.move_pill(i, Place::Step(-1)).unwrap();
+    assert_eq!(
+        sides(&bar),
+        "l:cpu l:workspaces c:palette c:habits r:weather"
+    );
+    // The screen's edges don't move anything.
+    let i = bar.find_pill("cpu").unwrap();
+    assert_eq!(bar.move_pill(i, Place::Step(-1)).unwrap(), i);
+    // The file stays in screen order, so it reads left to right.
+    assert_eq!(bar.screen_order(), (0..bar.pills.len()).collect::<Vec<_>>());
+    bar.validate().unwrap();
+    assert!("middle".parse::<Place>().is_err());
+}
