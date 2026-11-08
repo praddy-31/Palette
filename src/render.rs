@@ -25,12 +25,50 @@ pub struct OutputFile {
 /// theme folder win. `paths` is for targets that build on the user's own
 /// config (starship) or list Palette's paths (shell).
 pub fn render(theme: &Theme, paths: &Paths) -> Result<Vec<OutputFile>> {
+    render_with(theme, paths, None)
+}
+
+/// [`render`] for a switch that starts on `wallpaper` (`palette set --wallpaper`). See-through
+/// apps (11g) get their own colours, lifted to read over the wallpaper this switch shows.
+pub fn render_with(
+    theme: &Theme,
+    paths: &Paths,
+    wallpaper: Option<&std::path::Path>,
+) -> Result<Vec<OutputFile>> {
+    render_selected(theme, paths, wallpaper, None)
+}
+
+/// [`render`] for only the targets named in `only` (`None`: all of them): a setting for one
+/// app (Ghostty's glass) renders just that app's file (14a).
+pub fn render_some(theme: &Theme, paths: &Paths, only: Option<&[&str]>) -> Result<Vec<OutputFile>> {
+    render_selected(theme, paths, None, only)
+}
+
+fn render_selected(
+    theme: &Theme,
+    paths: &Paths,
+    wallpaper: Option<&std::path::Path>,
+    only: Option<&[&str]>,
+) -> Result<Vec<OutputFile>> {
     let env = environment()?;
-    let ctx = context(theme, &crate::settings::load(paths).unwrap_or_default());
-    targets::ALL
-        .iter()
+    let settings = crate::settings::load(paths).unwrap_or_default();
+    let ctx = context(theme, &settings);
+    let shown = crate::effects::wallpaper_to_use(paths, theme, wallpaper);
+    let lifts = crate::glass::lifts(paths, theme, shown.as_deref());
+    targets::all()
+        .filter(|t| only.is_none_or(|names| names.contains(&t.name)))
         .filter_map(|t| Some((t.name, t.output.as_ref()?)))
-        .map(|(name, output)| render_one(&env, &ctx, theme, paths, name, output))
+        .map(|(name, output)| match lifts.get(name) {
+            Some(lift) => {
+                let lifted = Theme {
+                    colors: lift.colors.clone(),
+                    ..theme.clone()
+                };
+                let ctx = context(&lifted, &settings);
+                render_one(&env, &ctx, theme, paths, name, output)
+            }
+            None => render_one(&env, &ctx, theme, paths, name, output),
+        })
         .collect()
 }
 
@@ -129,10 +167,65 @@ fn context(theme: &Theme, settings: &crate::settings::Settings) -> Value {
     vars.insert("pop2".into(), Value::from(look.pop2));
     vars.insert("mode".into(), Value::from(theme.colors.mode.as_str()));
     vars.insert("theme".into(), Value::from(theme.name.clone()));
+    // Editors draw code on the selection (11h): their own, so syntax colours stay readable.
+    let level = if settings.original_colours.contains(&theme.name) {
+        crate::normalise::Level::Off
+    } else {
+        settings.readability
+    };
+    vars.insert(
+        "editor_selection".into(),
+        Value::from(crate::normalise::editor_selection(&theme.colors, level)),
+    );
+    // Lists draw coloured text on their selected line (F3): lazygit, fzf.
+    vars.insert(
+        "list_selection".into(),
+        Value::from(crate::normalise::list_selection(&theme.colors, level)),
+    );
     // Preferences that change how a target looks (`settings.toml`).
+    vars.insert("bar_scroll".into(), Value::from(settings.bar_scroll));
     vars.insert("obsidian_ring".into(), Value::from(settings.obsidian_ring));
     vars.insert("obsidian_dim".into(), Value::from(settings.obsidian_dim));
+    // Zed glass: two-digit alpha for see-through surfaces (strength 50 → 80)
+    // and for raised ones (menus, popovers), which stay more solid (→ d1).
+    let see = f64::from(settings.zed_strength.min(100)) / 100.0;
+    let alpha = |opacity: f64| format!("{:02x}", (opacity * 255.0).round() as u8);
+    vars.insert("zed_see".into(), Value::from(alpha(1.0 - see)));
+    vars.insert(
+        "zed_see_raised".into(),
+        Value::from(alpha(1.0 - see * 0.36)),
+    );
+    vars.insert("glass".into(), glass_vars(settings));
     Value::from_object(vars)
+}
+
+/// Terminal glass (`palette glass`), one entry per app: `kind` (as in
+/// settings.toml), `opacity` as text (`"0.80"`, `"1.00"` when solid) and `blur`
+/// (0-100, 0 unless `blurred`). Each template turns these into its own keys.
+fn glass_vars(settings: &crate::settings::Settings) -> Value {
+    use crate::settings::TermGlass;
+    let map: BTreeMap<String, Value> = crate::settings::GLASS_APPS
+        .iter()
+        .map(|app| {
+            let g = settings.glass(app);
+            let opacity = match g.kind {
+                TermGlass::Own | TermGlass::Solid => "1.00".to_string(),
+                _ => format!("{:.2}", 1.0 - f64::from(g.strength.min(100)) / 100.0),
+            };
+            let blur = if g.kind == TermGlass::Blurred {
+                g.blur
+            } else {
+                0
+            };
+            let entry: BTreeMap<String, Value> = BTreeMap::from([
+                ("kind".into(), Value::from(g.kind.as_str())),
+                ("opacity".into(), Value::from(opacity)),
+                ("blur".into(), Value::from(blur.min(100))),
+            ]);
+            (app.to_string(), Value::from_object(entry))
+        })
+        .collect();
+    Value::from_object(map)
 }
 
 /// `#7aa2f7` → `7aa2f7`
@@ -264,7 +357,7 @@ mod tests {
     #[test]
     fn renders_every_target() {
         let files = render(&tokyo(), &paths()).unwrap();
-        let with_output = targets::ALL.iter().filter(|t| t.output.is_some()).count();
+        let with_output = targets::all().filter(|t| t.output.is_some()).count();
         assert_eq!(files.len(), with_output);
         for f in files.iter().filter(|f| f.name != "starship.toml") {
             let s = std::str::from_utf8(&f.contents).unwrap();
@@ -275,6 +368,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "macos")] // the Mac's targets / CoreText fonts
     fn sketchybar_matches_owner_names() {
         let files = render(&tokyo(), &paths()).unwrap();
         let s = text(&files, "sketchybar.sh");
@@ -295,6 +389,163 @@ mod tests {
         alacritty
             .parse::<toml::Table>()
             .expect("alacritty.toml is valid TOML");
+    }
+
+    /// Terminal glass: "own" writes nothing (the user's config decides); every
+    /// other kind writes that app's keys, and Alacritty's file stays valid TOML.
+    #[test]
+    fn terminal_glass_lines() {
+        use crate::settings::{Settings, TermGlass, WindowGlass};
+        let env = environment().unwrap();
+        let theme = theme::load(&paths(), "tokyo-night").unwrap();
+        let render = |app: &str, kind: TermGlass| {
+            let mut settings = Settings::default();
+            settings.glass.insert(
+                app.into(),
+                WindowGlass {
+                    kind,
+                    strength: 30,
+                    blur: 80,
+                },
+            );
+            env.get_template(app)
+                .unwrap()
+                .render(context(&theme, &settings))
+                .unwrap()
+        };
+        assert!(!render("ghostty", TermGlass::Own).contains("background-opacity"));
+        assert!(!render("kitty", TermGlass::Own).contains("background_opacity"));
+        assert!(!render("alacritty", TermGlass::Own).contains("[window]"));
+        let g = render("ghostty", TermGlass::Blurred);
+        assert!(
+            g.contains("\nbackground-opacity = 0.70\nbackground-blur = 80\n"),
+            "{g}"
+        );
+        let g = render("ghostty", TermGlass::Solid);
+        assert!(
+            g.contains("\nbackground-opacity = 1.00\nbackground-blur = false\n"),
+            "{g}"
+        );
+        let g = render("ghostty", TermGlass::LiquidGlass);
+        assert!(g.contains("background-blur = macos-glass-regular\n"), "{g}");
+        let k = render("kitty", TermGlass::Blurred);
+        assert!(
+            k.contains("background_opacity 0.70\n") && k.contains("background_blur 64\n"),
+            "{k}"
+        );
+        // Dispatch reads `glass` from its JSON colours file; it must stay valid JSON.
+        for kind in TermGlass::kinds("dispatch") {
+            let text = render("dispatch", *kind);
+            let json: serde_json::Value =
+                serde_json::from_str(&text).unwrap_or_else(|e| panic!("{kind:?}: {e}\n{text}"));
+            assert_eq!(json["glass"]["kind"], kind.as_str());
+            assert!(json["glass"]["opacity"].is_f64(), "{text}");
+        }
+        let d: serde_json::Value =
+            serde_json::from_str(&render("dispatch", TermGlass::Blurred)).unwrap();
+        assert_eq!(d["glass"]["blur"], 80);
+        assert_eq!(d["glass"]["opacity"], 0.7);
+        // EasyPlots (also on Linux) and the Habit Tracker read it the same way.
+        for (app, kind) in ["easyplots", "habit-tracker"]
+            .into_iter()
+            .flat_map(|a| TermGlass::kinds(a).iter().map(move |k| (a, k)))
+        {
+            let text = render(app, *kind);
+            let json: serde_json::Value =
+                serde_json::from_str(&text).unwrap_or_else(|e| panic!("{kind:?}: {e}\n{text}"));
+            assert_eq!(json["glass"]["kind"], kind.as_str());
+        }
+        for kind in TermGlass::kinds("alacritty") {
+            let text = render("alacritty", *kind);
+            let toml: toml::Table = text.parse().unwrap_or_else(|e| panic!("{kind:?}: {e}"));
+            if *kind != TermGlass::Own {
+                let window = toml["window"].as_table().unwrap();
+                assert!(window["opacity"].is_float(), "{kind:?}");
+                assert_eq!(window["blur"].as_bool(), Some(*kind == TermGlass::Blurred));
+            }
+        }
+    }
+
+    /// Zed drops a whole theme file over one bad colour, so every bundled
+    /// theme, at every strength, must give strict JSON with `#rrggbb[aa]`
+    /// only, and the three window kinds under their fixed names.
+    #[test]
+    fn zed_theme_is_strict_json_with_valid_colours() {
+        let env = environment().unwrap();
+        for (name, _) in theme::list(&paths()).unwrap() {
+            let theme = theme::load(&paths(), &name).unwrap();
+            for strength in [0, 50, 100] {
+                let settings = crate::settings::Settings {
+                    zed_strength: strength,
+                    ..Default::default()
+                };
+                let text = env
+                    .get_template("zed")
+                    .unwrap()
+                    .render(context(&theme, &settings))
+                    .unwrap();
+                let json: serde_json::Value = serde_json::from_str(&text)
+                    .unwrap_or_else(|e| panic!("{name} {strength}: {e}\n{text}"));
+                let themes = json["themes"].as_array().unwrap();
+                let kinds: Vec<_> = themes
+                    .iter()
+                    .map(|t| {
+                        (
+                            t["name"].as_str().unwrap(),
+                            t["style"]["background.appearance"].as_str().unwrap(),
+                        )
+                    })
+                    .collect();
+                assert_eq!(
+                    kinds,
+                    [
+                        ("Palette", "opaque"),
+                        ("Palette Glass", "blurred"),
+                        ("Palette Clear", "transparent")
+                    ]
+                );
+                let see = ["ff", "80", "00"][usize::from(strength / 50)];
+                assert!(
+                    themes[1]["style"]["background"]
+                        .as_str()
+                        .unwrap()
+                        .ends_with(see)
+                );
+                for t in themes {
+                    assert_eq!(t["appearance"], theme.colors.mode.as_str());
+                    let mut colours = Vec::new();
+                    for (key, v) in t["style"].as_object().unwrap() {
+                        match (key.as_str(), v) {
+                            ("background.appearance", _) => {}
+                            ("players", serde_json::Value::Array(ps)) => {
+                                for p in ps {
+                                    colours.extend(p.as_object().unwrap().values().cloned());
+                                }
+                            }
+                            ("syntax", serde_json::Value::Object(syn)) => {
+                                for s in syn.values() {
+                                    colours.push(s["color"].clone());
+                                    assert!(
+                                        s.get("font_style").is_some()
+                                            && s.get("font_weight").is_some()
+                                    );
+                                }
+                            }
+                            _ => colours.push(v.clone()),
+                        }
+                    }
+                    for c in colours {
+                        let c = c.as_str().unwrap_or_else(|| panic!("{name}: {c}"));
+                        let hex = c.strip_prefix('#').unwrap_or("");
+                        assert!(
+                            (hex.len() == 6 || hex.len() == 8)
+                                && hex.chars().all(|ch| ch.is_ascii_hexdigit()),
+                            "{name} {strength}: bad colour {c}"
+                        );
+                    }
+                }
+            }
+        }
     }
 
     #[test]

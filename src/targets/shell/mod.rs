@@ -42,7 +42,7 @@ fn configs(paths: &Paths) -> Vec<PathBuf> {
 fn finish(paths: &Paths, header: String) -> Result<String> {
     let mut out = header;
     let settings = crate::settings::load(paths)?;
-    for target in super::ALL.iter().filter(|t| settings.is_on(t.name)) {
+    for target in super::all().filter(|t| settings.is_on(t.name)) {
         let lines = (target.env)(paths);
         if !lines.is_empty() {
             out.push_str(&format!("\n# {}\n", target.name));

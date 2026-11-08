@@ -6,7 +6,8 @@
 //! <dir>/
 //!   palette-export.toml   version, the exporting home folder, active theme
 //!   README.txt            what this is and how to import it
-//!   palette/              settings.toml, sync.toml, themes/ (incl. wallpapers), wiring/
+//!   palette/              settings.toml, sync.toml, themes/ (incl. wallpapers), wiring/,
+//!                         wallpapers/ (the library, only if chosen)
 //!   configs/<path>        the user's own configs, by path under their home
 //! ```
 //!
@@ -32,6 +33,9 @@ pub struct SyncConfig {
     /// Paths relative to home: files or whole folders.
     pub configs: Vec<String>,
     pub wallpapers: bool,
+    /// The wallpaper library (`~/.config/palette/wallpapers/`), off by default: it can be
+    /// large, and it's pictures you collected rather than a setup (ROADMAP 13a).
+    pub library: bool,
 }
 
 fn sync_file(paths: &Paths) -> PathBuf {
@@ -94,10 +98,15 @@ pub fn load_or_create(paths: &Paths) -> Result<(SyncConfig, bool)> {
                 .get("wallpapers")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(true);
+            let library = table
+                .get("library")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             Ok((
                 SyncConfig {
                     configs,
                     wallpapers,
+                    library,
                 },
                 false,
             ))
@@ -106,6 +115,7 @@ pub fn load_or_create(paths: &Paths) -> Result<(SyncConfig, bool)> {
             let config = SyncConfig {
                 configs: default_configs(paths),
                 wallpapers: true,
+                library: false,
             };
             save(paths, &config)?;
             Ok((config, true))
@@ -128,6 +138,8 @@ fn save(paths: &Paths, config: &SyncConfig) -> Result<()> {
          # Theme wallpapers (can be large)\n",
     );
     text.push_str(&format!("wallpapers = {}\n", config.wallpapers));
+    text.push_str("\n# Your wallpaper library, ~/.config/palette/wallpapers (can be large)\n");
+    text.push_str(&format!("library = {}\n", config.library));
     fs::create_dir_all(paths.root())?;
     fs::write(sync_file(paths), text).context("writing sync.toml")
 }
@@ -222,6 +234,8 @@ pub struct ExportReport {
 pub struct ExportOptions {
     /// `None`: as sync.toml says.
     pub wallpapers: Option<bool>,
+    /// `None`: as sync.toml says (off unless you turned it on there).
+    pub library: Option<bool>,
     pub configs: Option<bool>,
 }
 
@@ -249,9 +263,22 @@ pub fn export(paths: &Paths, dir: &Path, options: &ExportOptions) -> Result<Expo
 
     // Palette's own folder, minus what is rebuilt on any Mac.
     let wallpapers = options.wallpapers.unwrap_or(sync.wallpapers);
+    let library = options.library.unwrap_or(sync.library);
     let mut palette = Copied::default();
     let root = paths.root();
-    for name in ["settings.toml", "sync.toml", "themes", "wiring"] {
+    // The library lands where import copies it back: `palette/` mirrors Palette's folder.
+    let names: &[&str] = if library {
+        &[
+            "settings.toml",
+            "sync.toml",
+            "themes",
+            "wiring",
+            "wallpapers",
+        ]
+    } else {
+        &["settings.toml", "sync.toml", "themes", "wiring"]
+    };
+    for &name in names {
         let src = root.join(name);
         if fs::symlink_metadata(&src).is_ok() {
             let skip = |rel: &Path| {
@@ -441,8 +468,7 @@ pub fn import(paths: &Paths, dir: &Path, dry_run: bool) -> Result<ImportReport> 
 
 /// Targets whose configs an import brought along (for the summary).
 pub fn imported_apps(report: &ImportReport) -> Vec<&'static str> {
-    targets::ALL
-        .iter()
+    targets::all()
         .map(|t| t.name)
         .filter(|name| {
             report.written.iter().any(|p| {

@@ -34,3 +34,11 @@ blue = "{{ ansi[12] }}"
 magenta = "{{ ansi[13] }}"
 cyan = "{{ ansi[14] }}"
 white = "{{ ansi[15] }}"
+{% set g = glass.alacritty -%}
+{% if g.kind != "own" %}
+# Window glass, from Palette (Settings → Apps → Alacritty, or `palette glass alacritty`).
+# Your own alacritty.toml wins if it sets these too.
+[window]
+opacity = {{ g.opacity }}
+blur = {% if g.blur > 0 %}true{% else %}false{% endif %}
+{% endif -%}

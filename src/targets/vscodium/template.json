@@ -49,7 +49,7 @@
     "editor.background": "{{ background }}",
     "editor.foreground": "{{ foreground }}",
     "editorCursor.foreground": "{{ bright_foreground }}",
-    "editor.selectionBackground": "{{ selection }}",
+    "editor.selectionBackground": "{{ editor_selection }}",
     "editor.inactiveSelectionBackground": "{{ lighter_background }}",
     "editor.lineHighlightBackground": "{{ lighter_background }}80",
     "editor.findMatchBackground": "{{ yellow }}66",

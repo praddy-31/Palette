@@ -1,6 +1,15 @@
 -- Palette: {{ theme }} (generated; edits are overwritten on the next switch)
 -- Loaded from your wezterm.lua by the line `palette init` added:
---   config.colors = dofile(".../palette/current/wezterm.lua")
+--   local colors, window = dofile(".../palette/current/wezterm.lua")
+-- Two values: the colours, then window settings (glass, `palette glass wezterm`;
+-- empty = your own). A line from before glass reads only the first.
+{% set g = glass.wezterm -%}
+local window = {
+{%- if g.kind != "own" %}
+  window_background_opacity = {{ g.opacity }},
+  macos_window_background_blur = {{ g.blur }},
+{%- endif %}
+}
 return {
   foreground = "{{ foreground }}",
   background = "{{ background }}",
@@ -24,4 +33,4 @@ return {
     new_tab = { bg_color = "{{ darker_background }}", fg_color = "{{ dark_foreground }}" },
     new_tab_hover = { bg_color = "{{ lighter_background }}", fg_color = "{{ foreground }}" },
   },
-}
+}, window

@@ -218,6 +218,11 @@ pub fn readable(hex: &str, bg: &str) -> String {
     lch.to_hex()
 }
 
+/// How different two colours look (OKLab ΔE): ~0.02 barely visible, 0.1 clearly different.
+pub fn delta_e(a: &str, b: &str) -> f32 {
+    Lch::from_hex(a).distance(&Lch::from_hex(b))
+}
+
 /// `a` moved `t` (0–1) of the way towards `b`, in sRGB.
 pub fn mix(a: &str, b: &str, t: f32) -> String {
     let (x, y) = (channels(a), channels(b));
@@ -303,6 +308,30 @@ impl Lch {
         format!("#{r:02x}{g:02x}{b:02x}")
     }
 
+    /// [`Self::to_hex`], but a colour outside sRGB loses chroma (hue and lightness kept)
+    /// until it fits, instead of each channel being clipped, which shifts the hue (a purple
+    /// lifted towards white turned pink: 311° → 323°).
+    pub(crate) fn to_hex_fit(self) -> String {
+        let fits = |c: f32| {
+            linear_from_oklab(Lch { c, ..self }.lab())
+                .iter()
+                .all(|v| (-0.001..=1.001).contains(v))
+        };
+        if fits(self.c) {
+            return self.to_hex();
+        }
+        let (mut lo, mut hi) = (0.0_f32, self.c);
+        for _ in 0..16 {
+            let mid = (lo + hi) / 2.0;
+            if fits(mid) {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        Lch { c: lo, ..self }.to_hex()
+    }
+
     /// Perceptual distance (OKLab ΔE): ~0.02 barely visible, 0.1 clearly different.
     pub(crate) fn distance(&self, o: &Lch) -> f32 {
         lab_distance(self.lab(), o.lab())
@@ -331,7 +360,13 @@ pub(crate) fn oklab(rgb: [f32; 3]) -> [f32; 3] {
 
 /// OKLab to sRGB (0–255 per channel, clamped into the screen's range).
 #[allow(clippy::excessive_precision)]
-pub(crate) fn from_oklab([ok_l, a, b]: [f32; 3]) -> [f32; 3] {
+pub(crate) fn from_oklab(lab: [f32; 3]) -> [f32; 3] {
+    linear_from_oklab(lab).map(|c| from_linear(c.clamp(0.0, 1.0)) * 255.0)
+}
+
+/// Linear sRGB (0-1 inside the gamut, outside it beyond), before any clipping.
+#[allow(clippy::excessive_precision)]
+pub(crate) fn linear_from_oklab([ok_l, a, b]: [f32; 3]) -> [f32; 3] {
     let l = (ok_l + 0.3963377774 * a + 0.2158037573 * b).powi(3);
     let m = (ok_l - 0.1055613458 * a - 0.0638541728 * b).powi(3);
     let s = (ok_l - 0.0894841775 * a - 1.2914855480 * b).powi(3);
@@ -340,7 +375,6 @@ pub(crate) fn from_oklab([ok_l, a, b]: [f32; 3]) -> [f32; 3] {
         -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
         -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s,
     ]
-    .map(|c| from_linear(c.clamp(0.0, 1.0)) * 255.0)
 }
 
 /// The main colours of a picture: k-means in OKLab (so groups are colours that

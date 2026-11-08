@@ -7,8 +7,8 @@ A theme is a folder of plain data. Palette never executes anything inside it.
 ```
 ~/.config/palette/themes/<name>/
   colors.toml      # required
-  backgrounds/     # optional: wallpapers (used from Phase 2)
-  preview.png      # optional: picker thumbnail (used from Phase 4)
+  backgrounds/     # optional: wallpapers
+  preview.png      # optional: picker thumbnail
   light.mode       # optional: empty file = light theme (Omarchy convention)
   <output file>    # optional: static override of one target, see below
 ```
@@ -98,7 +98,7 @@ output for one app.
 Not allowed for files that can run programs: `sketchybar.sh`, `borders.sh`,
 `shell.sh`, `tmux.conf`, `fzf.opts`, `starship.toml`, `lazygit.yml`,
 `neovim.lua` and `obsidian.css` (CSS can load from the web). Allowed: `ghostty.conf`, `kitty.conf`, `alacritty.toml`,
-`vscodium.json`, `btop.theme`. A theme containing one is
+`vscodium.json`, `zed.json`, `btop.theme`. A theme containing one is
 refused with an error. Override files must be regular files, not symlinks.
 
 ## Template context
@@ -112,8 +112,12 @@ Templates (`src/targets/<name>/template.*`, minijinja syntax) see:
   - `family`: six readable colours that belong together (accent first, then its nearest
     distinct hues; shades fill in for muted and monochrome themes). Obsidian headings H1–H6
   - `pop`, `pop2`: readable colours that stand apart from the family (italic, bold, highlight)
+  - `editor_selection`: the selection for editors, which draw syntax colours on it: the theme's
+    `selection`, or (when one of the syntax colours would hide on it) the same hue moved towards
+    the background until they read. Follows the readability level; Off keeps `selection`.
   - `primary`, `secondary`, `tertiary`: `family[0..3]`
 - `mode`: `"dark"` or `"light"`; `theme`: the theme name
+- Preferences from `settings.toml`: `obsidian_ring`, `obsidian_dim` (booleans); `zed_see`, `zed_see_raised` (two-digit hex alpha from the Zed glass strength, e.g. `80`, `d1`); `glass.<app>` for `ghostty`, `kitty`, `alacritty`, `wezterm`, `dispatch`, `easyplots`, `habit-tracker` (`palette glass`; the template reads it as `glass["habit-tracker"]`): `kind` (`own`, `solid`, `blurred`, `clear`, `liquid-glass`, `liquid-clear`), `opacity` as text (`"0.80"`, `"1.00"`), `blur` (0-100, 0 unless blurred)
 
 Filters:
 
@@ -135,9 +139,9 @@ Filters:
   generations/<millis>-<theme>/   # last 5 kept
     theme                         # the theme name
     sketchybar.sh  borders.sh  ghostty.conf  kitty.conf  alacritty.toml
-    tmux.conf  vscodium.json  neovim.lua  btop.theme  shell.sh
+    tmux.conf  vscodium.json  zed.json  neovim.lua  btop.theme  shell.sh
     starship.toml  fzf.opts  lazygit.yml  sketchybar-item.sh  obsidian.css
-    habit-tracker.json  chess-review.json
+    habit-tracker.json  chess-review.json  dispatch.json  easyplots.json
   themes/<name>/                  # user themes (or wallpapers for bundled ones)
   backup/<UTC time>/              # originals saved by `palette init` (last 5 kept)
   wiring/<target>.previous        # settings `init` changed (btop, VSCodium), for --remove

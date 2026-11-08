@@ -82,7 +82,8 @@ pub fn read(dir: &Path) -> BTreeMap<String, String> {
 /// `palette colours <theme>`: every colour, its original, and the report.
 pub fn sheet(paths: &Paths, name: &str) -> Result<Sheet> {
     let original = theme::load_original(paths, name)?;
-    let now = theme::load(paths, name)?;
+    // Your values, before Palette's readability fixes: this is what you edit.
+    let now = theme::load_edited(paths, name)?;
     let colours = now
         .colors
         .iter()
@@ -107,7 +108,7 @@ pub fn apply(paths: &Paths, name: &str, edit: &Edit) -> Result<Changes> {
     let original = theme::load_original(paths, name)?;
     let mut edits = read(&original.dir);
     // What each key looks like now, to report only real changes.
-    let now = theme::load(paths, name)?.colors;
+    let now = theme::load_edited(paths, name)?.colors;
     let wanted: Vec<(String, String)> = match edit {
         Edit::Set(changes) => {
             for (key, value) in changes {

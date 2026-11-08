@@ -147,6 +147,26 @@ fn export_takes_palette_and_configs_but_not_shell_rc() {
     mac.ok(&["export", out_dir2.to_str().unwrap(), "--no-wallpapers"]);
     assert!(!out_dir2.join("palette/themes/nord/backgrounds").exists());
 
+    // The wallpaper library (13a): off by default, on with --library or sync.toml.
+    mac.write(".config/palette/wallpapers/trips/lake.png", "png");
+    assert!(sync.contains("library = false"), "{sync}");
+    let off = mac.path("ExportOff");
+    mac.ok(&["export", off.to_str().unwrap()]);
+    assert!(!off.join("palette/wallpapers").exists(), "off by default");
+    let out_dir3 = mac.path("Export3");
+    mac.ok(&["export", out_dir3.to_str().unwrap(), "--library"]);
+    assert!(out_dir3.join("palette/wallpapers/trips/lake.png").is_file());
+    mac.write(
+        ".config/palette/sync.toml",
+        &sync.replace("library = false", "library = true"),
+    );
+    let out_dir4 = mac.path("Export4");
+    mac.ok(&["export", out_dir4.to_str().unwrap()]);
+    assert!(out_dir4.join("palette/wallpapers/trips/lake.png").is_file());
+    let out_dir5 = mac.path("Export5");
+    mac.ok(&["export", out_dir5.to_str().unwrap(), "--no-library"]);
+    assert!(!out_dir5.join("palette/wallpapers").exists());
+
     // An unrelated non-empty folder is refused; an earlier export is refreshed.
     mac.write("Busy/file.txt", "x");
     assert!(

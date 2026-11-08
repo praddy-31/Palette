@@ -4,6 +4,10 @@
 //! JSON rather than CSS: CSS can `@import` from the web, and the app accepts only plain
 //! `#rrggbb` values from this file. The app checks the file's date every couple of seconds
 //! while following, so a switch shows up live without a reload step here.
+//!
+//! `glass` carries the window look from `palette glass habit-tracker` (kind, opacity, blur),
+//! as for Dispatch. Kind "own" means the app's Settings → Appearance → Window glass decides.
+//! The app reads it even when it isn't following the colours.
 
 use super::{BASE, Output, Target};
 use crate::system::Outcome;
@@ -22,5 +26,6 @@ pub const TARGET: Target = Target {
     wiring: Wiring::Shell,
     installed: |paths| super::has_app(paths, "Habit Tracker.app"),
     reload: |_| Outcome::Unchanged("the app follows the file live".into()),
+    platforms: super::Platforms::Mac,
     ..BASE
 };

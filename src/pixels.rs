@@ -1,14 +1,18 @@
-//! Pixels in and out of image files without an image library. macOS's own
-//! `sips` turns anything it can open (PNG, JPEG, HEIC, WebP, TIFF…) into an
-//! uncompressed BMP and back; this module reads and writes that BMP, which is
-//! just a header and rows of bytes. Keeps the binary small (an image crate
-//! with PNG, JPEG and WebP decoders would add about 1 MB).
+//! Pixels in and out of image files. On macOS without an image library:
+//! macOS's own `sips` turns anything it can open (PNG, JPEG, HEIC, WebP,
+//! TIFF…) into an uncompressed BMP and back; this module reads and writes that
+//! BMP, which is just a header and rows of bytes. Keeps the Mac binary small.
+//! Linux has no `sips`, so there the `image` crate decodes and encodes PNG,
+//! JPEG and WebP in-process (a Linux-only dependency, see Cargo.toml).
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(target_os = "macos")]
+use std::path::PathBuf;
 
 use anyhow::{Context, Result, anyhow, bail};
 
+#[cfg(target_os = "macos")]
 use crate::system;
 
 /// An image as rows of RGB pixels, top row first.
@@ -31,6 +35,7 @@ impl Image {
 
 /// Read any image macOS can open. `max_side`: shrink so the longer side is
 /// at most this many pixels (enough for picking colours, much faster).
+#[cfg(target_os = "macos")]
 pub fn read(path: &Path, max_side: Option<u32>) -> Result<Image> {
     let tmp = temp_file("bmp");
     let (src, out) = (path.to_string_lossy(), tmp.to_string_lossy());
@@ -46,23 +51,42 @@ pub fn read(path: &Path, max_side: Option<u32>) -> Result<Image> {
     decode_bmp(&bytes.with_context(|| format!("opening {}", path.display()))?)
 }
 
-/// Write `image` as PNG or JPEG, by `path`'s extension.
-pub fn write(path: &Path, image: &Image) -> Result<()> {
+/// PNG or JPEG, by `path`'s extension.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Format {
+    Png,
+    Jpeg,
+}
+
+fn format_of(path: &Path) -> Result<Format> {
     let ext = path
         .extension()
         .map(|e| e.to_string_lossy().to_ascii_lowercase())
         .unwrap_or_default();
-    let format = match ext.as_str() {
-        "png" => "png",
-        "jpg" | "jpeg" => "jpeg",
+    match ext.as_str() {
+        "png" => Ok(Format::Png),
+        "jpg" | "jpeg" => Ok(Format::Jpeg),
         _ => bail!("{}: write .png or .jpg", path.display()),
+    }
+}
+
+/// JPEG quality, both systems.
+const JPEG_QUALITY: u8 = 92;
+
+/// Write `image` as PNG or JPEG, by `path`'s extension.
+#[cfg(target_os = "macos")]
+pub fn write(path: &Path, image: &Image) -> Result<()> {
+    let format = match format_of(path)? {
+        Format::Png => "png",
+        Format::Jpeg => "jpeg",
     };
+    let quality = JPEG_QUALITY.to_string();
     let tmp = temp_file("bmp");
     fs::write(&tmp, encode_bmp(image)).context("writing a temporary image")?;
     let (src, out) = (tmp.to_string_lossy(), path.to_string_lossy());
     let mut args = vec!["-s", "format", format];
     if format == "jpeg" {
-        args.extend(["-s", "formatOptions", "92"]);
+        args.extend(["-s", "formatOptions", &quality]);
     }
     args.extend([&*src, "--out", &*out]);
     let done = system::run("sips", &args).map_err(|e| anyhow!(e));
@@ -71,6 +95,79 @@ pub fn write(path: &Path, image: &Image) -> Result<()> {
         .with_context(|| format!("saving {}", path.display()))
 }
 
+/// A JPEG of `src` at most `max_side` pixels on its longer side (the picker's
+/// thumbnails). macOS: one `sips` run, which keeps HEIC and TIFF working.
+#[cfg(target_os = "macos")]
+pub fn thumbnail(src: &Path, dst: &Path, max_side: u32) -> Result<()> {
+    let (src, dst, size) = (
+        src.to_string_lossy(),
+        dst.to_string_lossy(),
+        max_side.to_string(),
+    );
+    system::run(
+        "sips",
+        &["-Z", &size, "-s", "format", "jpeg", &src, "--out", &dst],
+    )
+    .map(|_| ())
+    .map_err(|e| anyhow!(e))
+}
+
+/// Read a PNG, JPEG or WebP. `max_side`: shrink so the longer side is at
+/// most this many pixels.
+#[cfg(not(target_os = "macos"))]
+pub fn read(path: &Path, max_side: Option<u32>) -> Result<Image> {
+    let mut picture = image::ImageReader::open(path)
+        .with_context(|| format!("opening {}", path.display()))?
+        .with_guessed_format()
+        .with_context(|| format!("opening {}", path.display()))?
+        .decode()
+        .with_context(|| {
+            format!(
+                "{} isn't a PNG, JPEG or WebP Palette can read",
+                path.display()
+            )
+        })?;
+    if let Some(max) = max_side
+        && picture.width().max(picture.height()) > max
+    {
+        picture = picture.resize(max, max, image::imageops::FilterType::Triangle);
+    }
+    let rgb = picture.to_rgb8();
+    let (width, height) = (rgb.width() as usize, rgb.height() as usize);
+    Ok(Image {
+        width,
+        height,
+        rgb: rgb.pixels().map(|p| p.0).collect(),
+    })
+}
+
+/// Write `image` as PNG or JPEG, by `path`'s extension.
+#[cfg(not(target_os = "macos"))]
+pub fn write(path: &Path, image: &Image) -> Result<()> {
+    let format = format_of(path)?;
+    let bytes: Vec<u8> = image.rgb.iter().flatten().copied().collect();
+    let buffer = image::RgbImage::from_raw(image.width as u32, image.height as u32, bytes)
+        .ok_or_else(|| anyhow!("image size doesn't match its pixels"))?;
+    let saved = match format {
+        Format::Png => buffer.save_with_format(path, image::ImageFormat::Png),
+        Format::Jpeg => fs::File::create(path)
+            .map_err(image::ImageError::IoError)
+            .and_then(|file| {
+                let mut out = std::io::BufWriter::new(file);
+                image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, JPEG_QUALITY)
+                    .encode_image(&buffer)
+            }),
+    };
+    saved.with_context(|| format!("saving {}", path.display()))
+}
+
+/// A JPEG of `src` at most `max_side` pixels on its longer side.
+#[cfg(not(target_os = "macos"))]
+pub fn thumbnail(src: &Path, dst: &Path, max_side: u32) -> Result<()> {
+    write(dst, &read(src, Some(max_side))?)
+}
+
+#[cfg(target_os = "macos")]
 fn temp_file(ext: &str) -> PathBuf {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -163,8 +260,9 @@ mod tests {
         assert_eq!(decode_bmp(&encode_bmp(&image)).unwrap(), image);
     }
 
+    /// Through `sips` on macOS, the `image` crate on Linux.
     #[test]
-    fn through_sips() {
+    fn png_round_trip_and_shrink() {
         let dir = tempfile::tempdir().unwrap();
         let mut image = Image::new(4, 4);
         image.rgb.iter_mut().enumerate().for_each(|(i, p)| {

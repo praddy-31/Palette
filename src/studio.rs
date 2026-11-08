@@ -288,7 +288,10 @@ pub fn recolour(
 /// The theme is a temporary JSON file of this theme's colours.
 fn gowall(theme: &Theme, source: &Path, dest: &Path) -> Result<()> {
     if !has_gowall() {
-        bail!("gowall is not installed (brew install gowall), or use Palette's own recolour");
+        bail!(crate::problem::Problem::NotInstalled {
+            app: "gowall".into(),
+            hint: "brew install gowall, or use Palette's own recolour".into(),
+        });
     }
     let colours: Vec<String> = targets(theme)
         .into_iter()
@@ -647,7 +650,7 @@ pub fn new_from_wallpaper(
         bail!("invalid theme name `{name}`: use lowercase letters, digits and `-`");
     }
     if theme::load(paths, name).is_ok() || paths.themes().join(name).exists() {
-        bail!("a theme called `{name}` already exists; pick another name");
+        bail!(crate::problem::Problem::NameTaken { name: name.into() });
     }
     if !fs::metadata(image).is_ok_and(|m| m.is_file()) || !theme::is_image(image) {
         bail!(

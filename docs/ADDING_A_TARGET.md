@@ -172,6 +172,6 @@ PALETTE_HOME=./tmp/home cargo run -- doctor
 - [ ] A row in `docs/THEME_SPEC.md`: the output file in the generated-files list, and in the
       allowed or not-allowed override list
 - [ ] A note in the pull request on any choice worth explaining (and a justification for any new dependency)
-- [ ] The app's name and group in the Settings list in `app/ui/app.js` (`LABELS` and `GROUPS`)
+- [ ] The app's name and group in the Settings list in `app/ui/settings.js` (`LABELS` and `GROUPS`)
 - [ ] `docs/ARCHITECTURE.md` updated, and the README's list of what Palette themes
 - [ ] `cargo fmt`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test`

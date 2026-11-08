@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Palette",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "identifier": "dev.palette.switcher",
   "build": {
     "frontendDist": "ui",
@@ -11,69 +11,10 @@
   "app": {
     "withGlobalTauri": true,
     "macOSPrivateApi": true,
-    "windows": [
-      {
-        "label": "picker",
-        "title": "Palette",
-        "url": "picker.html",
-        "width": 440,
-        "height": 580,
-        "visible": false,
-        "decorations": false,
-        "transparent": true,
-        "alwaysOnTop": true,
-        "resizable": false,
-        "skipTaskbar": true,
-        "visibleOnAllWorkspaces": true
-      },
-      {
-        "label": "overlay",
-        "title": "Palette quick switch",
-        "url": "overlay.html",
-        "width": 860,
-        "height": 500,
-        "visible": false,
-        "decorations": false,
-        "transparent": true,
-        "alwaysOnTop": true,
-        "resizable": false,
-        "center": true,
-        "skipTaskbar": true,
-        "visibleOnAllWorkspaces": true
-      },
-      {
-        "label": "settings",
-        "title": "Palette Settings",
-        "url": "settings.html",
-        "width": 560,
-        "height": 680,
-        "minWidth": 480,
-        "minHeight": 480,
-        "visible": false,
-        "resizable": true,
-        "center": true
-      },
-      {
-        "label": "toast",
-        "title": "Palette",
-        "url": "toast.html",
-        "width": 340,
-        "height": 72,
-        "visible": false,
-        "decorations": false,
-        "transparent": true,
-        "alwaysOnTop": true,
-        "resizable": false,
-        "skipTaskbar": true,
-        "visibleOnAllWorkspaces": true,
-        "focus": false,
-        "focusable": false,
-        "acceptFirstMouse": true,
-        "shadow": false
-      }
-    ],
+    "windows": [],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'"
+      "csp": "default-src 'self'; img-src 'self' data: asset: http://asset.localhost; style-src 'self' 'unsafe-inline'; script-src 'self'",
+      "assetProtocol": { "enable": true, "scope": [] }
     }
   },
   "bundle": {

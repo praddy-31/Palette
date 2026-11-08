@@ -45,8 +45,8 @@ impl Row {
 }
 
 pub fn run(paths: &Paths) -> Result<Vec<Row>> {
-    let mut rows = vec![theme_row(paths)?];
-    for target in targets::ALL {
+    let mut rows = vec![system_row(), theme_row(paths)?];
+    for target in targets::all() {
         rows.push(target_row(paths, target));
     }
     if let Some(row) = command_row() {
@@ -61,6 +61,30 @@ pub fn run(paths: &Paths) -> Result<Vec<Row>> {
     Ok(rows)
 }
 
+/// Which system and desktop Palette sees (it themes that one).
+fn system_row() -> Row {
+    use crate::system::session::Session;
+    let session = Session::detect();
+    let mut row = match &session {
+        Session::Other(_) => Row::new(
+            "system",
+            Status::Fix,
+            format!(
+                "Linux, {}: only apps and files are themed (GNOME, KDE Plasma and niri are supported)",
+                session.label()
+            ),
+        ),
+        Session::Mac => Row::new("system", Status::Ok, "macOS"),
+        s => Row::new("system", Status::Ok, format!("Linux, {}", s.label())),
+    };
+    if matches!(session, Session::Niri { noctalia: true }) {
+        row.notes.push(Note::info(
+            "Noctalia can theme apps too: switch off its templates for apps Palette themes (terminals…), or `palette apps off <app>` to leave one to Noctalia",
+        ));
+    }
+    row
+}
+
 /// Active theme, and are all its generated files there?
 fn theme_row(paths: &Paths) -> Result<Row> {
     let Some(name) = state::current_theme(paths)? else {
@@ -70,8 +94,7 @@ fn theme_row(paths: &Paths) -> Result<Row> {
             "none set: run `palette set <theme>`",
         ));
     };
-    let missing: Vec<&str> = targets::ALL
-        .iter()
+    let missing: Vec<&str> = targets::all()
         .filter_map(|t| t.output.as_ref())
         .map(|o| o.file)
         .filter(|f| !paths.current().join(f).is_file())
@@ -132,6 +155,8 @@ fn target_row(paths: &Paths, target: &Target) -> Row {
     let mut row = match &target.wiring {
         Wiring::Shell if !installed => Row::new(target.name, Status::Off, "not installed"),
         Wiring::Shell if wired => Row::new(target.name, Status::Ok, "set up through shell.sh"),
+        Wiring::Direct if !installed => Row::new(target.name, Status::Off, "not installed"),
+        Wiring::Direct => Row::new(target.name, Status::Ok, "applied on every switch"),
         Wiring::Import(import) if wired => {
             let configs: Vec<_> = (import.configs)(paths)
                 .into_iter()

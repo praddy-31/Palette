@@ -121,7 +121,11 @@ fn contrast_report() {
     let ok = home.ok(&["check", "tokyo-night"]);
     assert!(ok.contains("all") && ok.contains("readable"), "{ok}");
     home.ok(&["set", "white"]);
-    let out = home.run(&["check"]);
+    // Palette fixes white's faint line numbers when it's used, and says so.
+    let fixed = home.ok(&["check"]);
+    assert!(fixed.contains("dark_foreground #c0c0c0 → #"), "{fixed}");
+    // Without the fixes: the theme's own colours, with a suggestion.
+    let out = home.run(&["check", "--level", "off"]);
     assert!(!out.status.success());
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(text.contains("dark_foreground"), "{text}");

@@ -692,10 +692,24 @@ pub fn save(paths: &Paths, new: Schedule) -> Result<Applied> {
         validate(paths, &new)?;
     }
     let mut all = settings::load(paths)?;
+    let before = all.schedule.location().ok();
     all.schedule = new;
     settings::save(paths, &all)?;
+    weather_follows(paths, before, all.schedule.location().ok())?;
     forget_boundary(paths);
     apply_now(paths)
+}
+
+/// The bar's weather pill uses Schedule's place: a new place rewrites a bar Palette manages.
+fn weather_follows(
+    paths: &Paths,
+    before: Option<(f64, f64, String)>,
+    now: Option<(f64, f64, String)>,
+) -> Result<()> {
+    if before != now {
+        crate::desktop::rewrite(paths, crate::desktop::Tool::Bar, true)?;
+    }
+    Ok(())
 }
 
 /// What `palette schedule on` was given; `None` keeps the saved value.

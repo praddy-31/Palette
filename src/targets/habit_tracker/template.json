@@ -18,5 +18,6 @@
   "green": "{{ green }}",
   "cyan": "{{ cyan }}",
   "blue": "{{ blue }}",
-  "magenta": "{{ magenta }}"
+  "magenta": "{{ magenta }}",
+  "glass": {% set g = glass["habit-tracker"] %}{ "kind": "{{ g.kind }}", "opacity": {{ g.opacity }}, "blur": {{ g.blur }} }
 }

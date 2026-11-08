@@ -235,8 +235,44 @@ pub fn set(paths: &Paths, tool: Tool, value: toml::Value) -> Result<Applied> {
     if !is_managed(paths, tool) {
         manage(paths, tool)?;
     }
-    write_and_reload(paths, tool, value, true)
+    let applied = write_and_reload(paths, tool, value, true)?;
+    // A new bar size moves the other displays' top gap with it (Windows → Match the MacBook screen).
+    if tool == Tool::Bar && is_managed(paths, Tool::Windows) {
+        let w: windows::Windows = load(paths, Tool::Windows)?;
+        if w.gaps.follow_bar && w.gaps.outer_top_other.is_some() {
+            rewrite(paths, Tool::Windows, true)?;
+        }
+    }
+    Ok(applied)
 }
+
+/// `palette desktop bar fit`, the Bar page's "Match the menu bar": size the bar to this Mac's
+/// menu bar strip and apply it (backup first, as any change).
+pub fn fit_bar_to_menu_bar(paths: &Paths) -> Result<Applied> {
+    let menu = crate::system::menu_bar_height()
+        .context("couldn't read the menu bar's height (macOS only)")?;
+    let bar: bar::Bar = load(paths, Tool::Bar)?;
+    set(
+        paths,
+        Tool::Bar,
+        to_value(&bar::matched_to_menu_bar(&bar, menu))?,
+    )
+}
+
+/// How far a Palette-managed top bar reaches down from the screen's top (offset + height): where
+/// windows on a display without a menu bar strip should start. `None` when Palette doesn't
+/// manage the bar or it sits at the bottom.
+pub fn bar_reach(paths: &Paths) -> Option<i64> {
+    if !is_managed(paths, Tool::Bar) {
+        return None;
+    }
+    let b: bar::Bar = load(paths, Tool::Bar).ok()?;
+    (b.position == "top").then(|| i64::from(b.y_offset.max(0)) + i64::from(b.height))
+}
+
+/// Settings that may be left out (off), so a saved file doesn't list them until they're set:
+/// `set` still knows them, and `off` (or `none`) takes one out again.
+const OPTIONAL: &[(Tool, &str)] = &[(Tool::Windows, "gaps.outer_top_other")];
 
 /// Change single settings by dotted key (`pill.height=28`), for the CLI.
 /// The value is read as TOML (`28`, `true`, `"text"`), else as text.
@@ -254,7 +290,12 @@ pub fn set_keys(paths: &Paths, tool: Tool, pairs: &[(String, String)]) -> Result
                 )
             })?;
             if i + 1 == parts.len() {
-                if !table.contains_key(*part) {
+                let optional = OPTIONAL.contains(&(tool, key.as_str()));
+                if optional && matches!(raw.as_str(), "off" | "none") {
+                    table.remove(*part);
+                    break;
+                }
+                if !table.contains_key(*part) && !optional {
                     bail!(
                         "`{key}` is not a {} setting (see `palette desktop {}`)",
                         tool.name(),
@@ -272,6 +313,17 @@ pub fn set_keys(paths: &Paths, tool: Tool, pairs: &[(String, String)]) -> Result
     set(paths, tool, value)
 }
 
+/// Writes a managed tool's config again from its saved settings, without a backup (nothing
+/// the user chose changes): Performance mode turning on or off. Not managed: nothing to do.
+/// `reload: false` only writes (the caller reloads the program itself, once).
+pub fn rewrite(paths: &Paths, tool: Tool, reload_now: bool) -> Result<Option<Applied>> {
+    if !is_managed(paths, tool) {
+        return Ok(None);
+    }
+    let value = get(paths, tool)?;
+    write_files(paths, tool, value, false, reload_now).map(Some)
+}
+
 fn parse_value(raw: &str) -> toml::Value {
     format!("v = {raw}")
         .parse::<toml::Table>()
@@ -285,6 +337,16 @@ fn write_and_reload(
     tool: Tool,
     value: toml::Value,
     backup_first: bool,
+) -> Result<Applied> {
+    write_files(paths, tool, value, backup_first, true)
+}
+
+fn write_files(
+    paths: &Paths,
+    tool: Tool,
+    value: toml::Value,
+    backup_first: bool,
+    reload_now: bool,
 ) -> Result<Applied> {
     // Typed and checked before anything is written.
     let (text, files, warnings) = match tool {
@@ -333,7 +395,11 @@ fn write_and_reload(
         tool,
         written,
         backup,
-        reload: reload(paths, tool),
+        reload: if reload_now {
+            reload(paths, tool)
+        } else {
+            Outcome::Skipped("reloaded with the theme".into())
+        },
         warnings,
     })
 }
@@ -349,7 +415,7 @@ fn ensure_colours(paths: &Paths, tool: Tool) -> Result<()> {
     };
     let current = paths.current().join(file);
     if current.is_file() && !fs::read_to_string(&current)?.contains("C_accent=") {
-        crate::refresh(paths)?;
+        crate::rerender(paths, None)?;
     }
     Ok(())
 }

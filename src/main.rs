@@ -17,9 +17,10 @@ Commands by job:
   Colours          check, colours
   Wallpapers       bg
   Desktop          desktop
-  Setup, health    init, apps, doctor, tools
+  Windows          glass, zed, obsidian, performance
+  Setup, health    init, apps, doctor, tools, log
   Another Mac      export, import
-  App, settings    ui, hotkey, obsidian
+  App              ui, hotkey
 
 Everything the app does is also a command here. Run `palette <command> --help` for details.";
 
@@ -38,8 +39,14 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     /// List available themes with colour swatches (* marks the active one)
+    ///
+    /// Words narrow the list by look: `palette list warm dark`, `palette list purple`
+    /// (dark, light, warm, cool, calm, vivid, mono, soft, high-contrast, and colour names).
     #[command(display_order = 1)]
-    List,
+    List {
+        /// Words the themes must match (by look or name)
+        words: Vec<String>,
+    },
     /// Print the active theme
     #[command(display_order = 2)]
     Current,
@@ -109,6 +116,81 @@ enum Command {
         #[arg(long, value_name = "on|off", value_parser = on_off)]
         dim: Option<bool>,
     },
+    /// Zed's window: solid or see-through glass, and how see-through
+    ///
+    /// Glass is blurred by default, at strength 50. With no options this shows
+    /// the current setting.
+    #[command(display_order = 22)]
+    Zed {
+        /// solid, blurred (frosted) or clear (no blur), as for `palette glass`
+        #[arg(value_name = "solid|blurred|clear", value_parser = |s: &str| palette::settings::Glass::parse(s).map_err(|e| e.to_string()))]
+        kind: Option<palette::settings::Glass>,
+        /// The same as the word above (`--glass off` still works)
+        #[arg(long, value_name = "off|blurred|clear", conflicts_with = "kind", value_parser = |s: &str| palette::settings::Glass::parse(s).map_err(|e| e.to_string()))]
+        glass: Option<palette::settings::Glass>,
+        /// How see-through the glass is: 0 solid, 100 fully clear
+        #[arg(long, value_name = "0-100", value_parser = clap::value_parser!(u8).range(0..=100))]
+        strength: Option<u8>,
+    },
+    /// A window (terminals, Dispatch, EasyPlots, Habit Tracker): your own setting, solid, or see-through glass
+    ///
+    /// For Ghostty, kitty, Alacritty, WezTerm, Dispatch, EasyPlots and the Habit Tracker. "own" (the default) writes
+    /// nothing, so the app's own config decides. Ghostty also has macOS 26's
+    /// own glass (liquid-glass, liquid-clear). With only the app, this shows
+    /// its current setting.
+    #[command(display_order = 22)]
+    Glass {
+        /// ghostty, kitty, alacritty, wezterm, dispatch, easyplots or habit-tracker
+        app: String,
+        /// own, solid, blurred (frosted), clear (no blur), liquid-glass, liquid-clear
+        #[arg(value_parser = |s: &str| palette::settings::TermGlass::parse(s).map_err(|e| e.to_string()))]
+        kind: Option<palette::settings::TermGlass>,
+        /// How see-through: 0 solid, 100 fully clear
+        #[arg(long, value_name = "0-100", value_parser = clap::value_parser!(u8).range(0..=100))]
+        strength: Option<u8>,
+        /// How strong the blur is (blurred only; Alacritty: on or off)
+        #[arg(long, value_name = "0-100", value_parser = clap::value_parser!(u8).range(0..=100))]
+        blur: Option<u8>,
+    },
+    /// Performance mode: every glass window solid, a plainer bar and borders
+    ///
+    /// One switch for the GPU: Ghostty, kitty, Alacritty, WezTerm, Dispatch, EasyPlots, the
+    /// Habit Tracker and Zed go solid, SketchyBar goes opaque without blur, the borders lose glow and HiDPI, and the stats pill
+    /// updates every 30 s (bar and borders only when Palette manages them). Your own
+    /// settings never change: `off` puts every look back. Choose the parts with --glass,
+    /// --bar, --borders, --stats (on or off). With nothing, shows the current state.
+    #[command(display_order = 23)]
+    Performance {
+        /// on, off or toggle
+        #[arg(value_parser = ["on", "off", "toggle"])]
+        state: Option<String>,
+        /// Glass windows solid (on or off)
+        #[arg(long, value_parser = on_off)]
+        glass: Option<bool>,
+        /// No blur behind the bar (on or off)
+        #[arg(long, value_parser = on_off)]
+        bar: Option<bool>,
+        /// Plain window borders: no glow, hidpi off (on or off)
+        #[arg(long, value_parser = on_off)]
+        borders: Option<bool>,
+        /// Stats pill every 30 s (on or off)
+        #[arg(long, value_parser = on_off)]
+        stats: Option<bool>,
+    },
+    /// A log of switches on this Mac: on, off, or show the last lines
+    ///
+    /// Off by default. When on, every switch, undo and refresh adds one line to
+    /// ~/.config/palette/palette.log (time, app or cli, theme, what failed). It is moved
+    /// to palette.log.1 at 200 KB. Nothing is ever sent anywhere.
+    #[command(display_order = 24)]
+    Log {
+        /// on, off or show (with nothing: whether it's on, and where it is)
+        #[arg(value_parser = ["on", "off", "show"])]
+        state: Option<String>,
+        /// How many lines `show` prints (20 if left out); `-n 5` alone means `show -n 5`
+        #[arg(short = 'n', long)]
+        lines: Option<usize>,
+    },
     /// Choose which apps Palette themes (all on by default)
     #[command(display_order = 15)]
     Apps {
@@ -123,6 +205,12 @@ enum Command {
         /// Leave wallpapers out this time
         #[arg(long)]
         no_wallpapers: bool,
+        /// Take your wallpaper library along this time (sync.toml: `library = true` for always)
+        #[arg(long, conflicts_with = "no_library")]
+        library: bool,
+        /// Leave the wallpaper library out this time
+        #[arg(long)]
+        no_library: bool,
         /// Leave your app configs out this time
         #[arg(long)]
         no_configs: bool,
@@ -135,11 +223,31 @@ enum Command {
         #[arg(long)]
         dry_run: bool,
     },
-    /// Open the Palette app's picker (or the overlay)
+    /// Open the Palette app's picker (or the overlay), or choose how the app behaves
+    ///
+    /// --windows on-demand keeps only the quick switcher loaded: the picker, Settings and
+    /// the switch notice are made when opened and closed after a minute hidden, which frees
+    /// their memory (the first open takes about a second). all-on-demand does the same for
+    /// the quick switcher (lightest; the hotkey then takes a second after a quiet minute).
+    /// --close-idle-settings on also closes Settings after ten minutes without focus while
+    /// it's open. --click chooses what a click on the menu bar icon (and the bar's theme
+    /// pill) opens. Each changes the setting without opening anything; --status shows them.
     #[command(display_order = 20)]
     Ui {
         #[arg(long)]
         overlay: bool,
+        /// ready (all windows loaded, open at once), on-demand (lighter) or all-on-demand (lightest)
+        #[arg(long, value_name = "MODE", value_parser = ["ready", "on-demand", "all-on-demand"])]
+        windows: Option<String>,
+        /// On demand: close Settings after ten minutes without focus, even while open
+        #[arg(long, value_name = "ON|OFF", value_parser = ["on", "off"])]
+        close_idle_settings: Option<String>,
+        /// What a menu bar click opens: menu, picker or quick-switcher
+        #[arg(long, value_name = "WHAT", value_parser = ["menu", "picker", "quick-switcher"])]
+        click: Option<String>,
+        /// Show the settings above
+        #[arg(long)]
+        status: bool,
     },
     /// Point your app configs at Palette's files (backs them up first)
     #[command(display_order = 14)]
@@ -154,8 +262,13 @@ enum Command {
     /// Community themes you can install (Omarchy's extra themes); offline list
     #[command(display_order = 8)]
     Catalog {
-        /// Only names/titles containing this
-        search: Option<String>,
+        /// Words the themes must match: part of the name or title, or how they look
+        /// (`palette catalog warm dark`)
+        words: Vec<String>,
+        /// Write every catalogue theme, drawn as made and with Palette's fixes, to one
+        /// offline page (`palette catalog --sheet themes.html`)
+        #[arg(long, value_name = "FILE")]
+        sheet: Option<std::path::PathBuf>,
     },
     /// Install a theme from the catalogue, a GitHub link or a folder
     ///
@@ -215,13 +328,35 @@ enum Command {
         #[command(subcommand)]
         command: Option<ScheduleCommand>,
     },
-    /// Contrast report: colour pairs of a theme that are hard to read
-    /// (default: the active theme)
+    /// Contrast report and readability fixes (default: the active theme)
+    ///
+    /// When a theme is used, Palette fixes colours that are hard to read or see (a selection
+    /// the shade of the background, faint line numbers), in lightness only, never a key you
+    /// edited. The report lists those fixes, then any pair still low.
     Check {
         theme: Option<String>,
         /// Apply every suggested colour (same as `palette colours --fix`)
         #[arg(long)]
         fix: bool,
+        /// How hard the fixes push, for every theme: off, minimal (default) or strong (WCAG AA)
+        #[arg(long, value_name = "LEVEL", value_parser = ["off", "minimal", "strong"])]
+        level: Option<String>,
+        /// on: use this theme exactly as its author made it (no fixes); off: fix it again
+        #[arg(long, value_name = "ON|OFF", value_parser = ["on", "off"])]
+        original: Option<String>,
+        /// How the theme works in each kind of app (terminals, editors, lists, Palette)
+        #[arg(long)]
+        app: bool,
+        /// Glass: how hard this theme's text is lifted on see-through windows: auto
+        /// (readable over the wallpaper's average), 0 (off) or 1-100 (stronger, up to 2×)
+        #[arg(long, value_name = "auto|0-100")]
+        glass_lift: Option<String>,
+        /// Monochrome themes, every one: space the grey terminal colours apart (default on)
+        #[arg(long, value_name = "ON|OFF", value_parser = ["on", "off"])]
+        greys: Option<String>,
+        /// Monochrome themes, every one: a faint tint of the theme's hue (default off)
+        #[arg(long, value_name = "ON|OFF", value_parser = ["on", "off"])]
+        tint: Option<String>,
     },
     /// A theme's colours: show them, change them, or undo your changes
     ///
@@ -305,6 +440,8 @@ enum DesktopCommand {
     },
     /// Write the config again from the saved settings
     Apply,
+    /// bar: as tall as the Mac's menu bar strip (the notch), pills and text to match
+    Fit,
     /// The backups made before each change, newest first
     Backups,
     /// Go back to a backup: 1 is the newest, or its name (see `backups`)
@@ -361,6 +498,11 @@ enum FavCommand {
     Cycle {
         #[arg(value_parser = ["all", "favourites"])]
         what: String,
+    },
+    /// Scrolling on the bar's theme pill switches theme: show, or turn it on/off
+    Scroll {
+        #[arg(value_parser = ["on", "off"])]
+        on: Option<String>,
     },
 }
 
@@ -534,7 +676,28 @@ fn on_off(value: &str) -> Result<bool, String> {
     }
 }
 
+/// `palette list | head` should stop quietly, like other Unix tools. Rust ignores `SIGPIPE`,
+/// so a write to a closed pipe returns an error and `println!` panics on it ("failed printing
+/// to stdout: Broken pipe", found 2026-11-08); the default signal ends the process instead.
+/// Declared by hand, one function, rather than a `libc` dependency (rule 6).
+#[cfg(unix)]
+fn quiet_broken_pipe() {
+    unsafe extern "C" {
+        fn signal(signum: i32, handler: usize) -> usize;
+    }
+    const SIGPIPE: i32 = 13; // the same on macOS and Linux
+    const SIG_DFL: usize = 0;
+    // SAFETY: called first thing in main, before any thread exists; resets one signal.
+    unsafe {
+        signal(SIGPIPE, SIG_DFL);
+    }
+}
+
+#[cfg(not(unix))]
+fn quiet_broken_pipe() {}
+
 fn main() -> ExitCode {
+    quiet_broken_pipe();
     match run(Cli::parse()) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
@@ -547,8 +710,13 @@ fn main() -> ExitCode {
 fn run(cli: Cli) -> Result<()> {
     let paths = Paths::from_env()?;
     match cli.command {
-        Command::List => list(&paths)?,
-        Command::Refresh => report(&palette::refresh(&paths)?, &paths),
+        Command::List { words } => list(&paths, &words.join(" "))?,
+        Command::Refresh => {
+            let s = palette::refresh(&paths)?;
+            println!("Re-applied {}: every app reloaded (no Undo step)", s.theme);
+            print_changes(&s);
+            print_effects(&s.effects);
+        }
         Command::Doctor => doctor(&paths)?,
         Command::Current => match state::current_theme(&paths)? {
             Some(name) => println!("{name}"),
@@ -589,20 +757,130 @@ fn run(cli: Cli) -> Result<()> {
                 word(dim)
             );
         }
+        Command::Zed {
+            kind,
+            glass,
+            strength,
+        } => {
+            let (glass, strength) = palette::zed_look(&paths, kind.or(glass), strength)?;
+            match glass {
+                palette::settings::Glass::Off => println!("Zed glass: solid"),
+                g => println!("Zed glass: {}, strength {strength}", g.as_str()),
+            }
+        }
+        Command::Glass {
+            app,
+            kind,
+            strength,
+            blur,
+        } => {
+            let app = app.to_ascii_lowercase();
+            let g = palette::glass(&paths, &app, kind, strength, blur)?;
+            match g.kind {
+                palette::settings::TermGlass::Own => {
+                    println!("{app} glass: own (your {app} config decides)")
+                }
+                palette::settings::TermGlass::Solid => println!("{app} glass: solid"),
+                palette::settings::TermGlass::Blurred => println!(
+                    "{app} glass: blurred, strength {}, blur {}",
+                    g.strength, g.blur
+                ),
+                k => println!("{app} glass: {}, strength {}", k.as_str(), g.strength),
+            }
+        }
+        Command::Log { state, lines } => match (state.as_deref(), lines) {
+            (Some("show"), _) | (None, Some(_)) => {
+                let tail = palette::log::tail(&paths, lines.unwrap_or(20));
+                if tail.is_empty() {
+                    println!("The log is empty (`palette log on` starts it).");
+                }
+                for line in tail {
+                    println!("{line}");
+                }
+            }
+            (other, _) => {
+                let on = palette::set_log(&paths, other.map(|s| s == "on"))?;
+                println!(
+                    "Log: {} ({})",
+                    if on { "on" } else { "off" },
+                    palette::log::file(&paths).display()
+                );
+            }
+        },
+        Command::Performance {
+            state,
+            glass,
+            bar,
+            borders,
+            stats,
+        } => {
+            let on = match state.as_deref() {
+                Some("on") => Some(true),
+                Some("off") => Some(false),
+                Some(_) => Some(!palette::settings::load(&paths)?.performance.on),
+                None => None,
+            };
+            let parts: Vec<(&str, bool)> = [
+                ("glass", glass),
+                ("bar", bar),
+                ("borders", borders),
+                ("stats", stats),
+            ]
+            .into_iter()
+            .filter_map(|(k, v)| v.map(|v| (k, v)))
+            .collect();
+            let p = palette::performance(&paths, on, &parts)?;
+            let yes = |b: bool| if b { "on" } else { "off" };
+            println!(
+                "Performance mode: {} (glass {}, bar {}, borders {}, stats {})",
+                yes(p.on),
+                yes(p.glass),
+                yes(p.bar),
+                yes(p.borders),
+                yes(p.stats)
+            );
+        }
         Command::Export {
             dir,
             no_wallpapers,
+            library,
+            no_library,
             no_configs,
-        } => export(&paths, &dir, no_wallpapers, no_configs)?,
+        } => {
+            let library = (library || no_library).then_some(library);
+            export(&paths, &dir, no_wallpapers, library, no_configs)?
+        }
         Command::Import { dir, dry_run } => import(&paths, &dir, dry_run)?,
-        Command::Ui { overlay } => {
-            let url = if overlay {
-                "palette://overlay"
+        Command::Ui {
+            overlay,
+            windows,
+            click,
+            close_idle_settings,
+            status,
+        } => {
+            if windows.is_none() && click.is_none() && close_idle_settings.is_none() && !status {
+                palette::system::open_app(overlay).map_err(anyhow::Error::msg)?;
             } else {
-                "palette://picker"
-            };
-            palette::system::run("open", &[url])
-                .map_err(|e| anyhow::anyhow!("{e} (is the Palette app installed?)"))?;
+                let windows = windows
+                    .as_deref()
+                    .map(palette::settings::AppWindows::parse)
+                    .transpose()?;
+                let click = click
+                    .as_deref()
+                    .map(palette::settings::MenuClick::parse)
+                    .transpose()?;
+                let (w, c) = palette::app_prefs(&paths, windows, click)?;
+                let idle = palette::set_close_idle_settings(
+                    &paths,
+                    close_idle_settings.as_deref().map(|v| v == "on"),
+                )?;
+                println!(
+                    "Windows: {}\nMenu bar click: {}\nClose idle Settings: {}",
+                    w.as_str(),
+                    c.as_str(),
+                    if idle { "on" } else { "off" }
+                );
+            }
         }
         Command::Undo => {
             let (name, effects) = palette::undo(&paths)?;
@@ -641,7 +919,16 @@ fn run(cli: Cli) -> Result<()> {
             }
         }
         Command::Schedule { command } => schedule(&paths, command)?,
-        Command::Catalog { search } => catalog(&paths, search.as_deref()),
+        Command::Catalog {
+            sheet: Some(file), ..
+        } => {
+            let n = palette::sheet::write(&paths, &file)?;
+            println!(
+                "{n} themes in {} (open it in a browser; works offline)",
+                file.display()
+            );
+        }
+        Command::Catalog { words, .. } => catalog(&paths, &words.join(" ")),
         Command::Install { source, name } => {
             println!("Downloading…");
             let done = palette::install::install(&paths, &source, name.as_deref())?;
@@ -676,8 +963,49 @@ fn run(cli: Cli) -> Result<()> {
                 println!("{}", done.message(&name));
             }
         }
-        Command::Check { theme, fix: false } => check(&paths, theme.as_deref())?,
-        Command::Check { theme, fix: true } => colours(&paths, theme, Vec::new(), None, true)?,
+        Command::Check {
+            theme, fix: true, ..
+        } => colours(&paths, theme, Vec::new(), None, true)?,
+        Command::Check {
+            theme,
+            level,
+            original,
+            greys,
+            tint,
+            glass_lift,
+            app,
+            ..
+        } => {
+            let on = |v: Option<String>| v.map(|v| v == "on");
+            palette::set_monochrome(&paths, on(greys), on(tint))?;
+            if let Some(lift) = glass_lift {
+                let name = match theme.clone() {
+                    Some(t) => t,
+                    None => state::current_theme(&paths)?
+                        .ok_or_else(|| anyhow::anyhow!("no theme is active yet: name one"))?,
+                };
+                let lift = palette::glass::Lift::parse(&lift)?;
+                let now = palette::glass::set_lift(&paths, &name, Some(lift))?;
+                println!("Glass lift for {name}: {}", now.label());
+            }
+            if app {
+                for v in palette::check::apps(&paths, theme.as_deref())? {
+                    let why = if v.why.is_empty() {
+                        "everything reads".to_string()
+                    } else {
+                        v.why.join("; ")
+                    };
+                    println!("{:<5} {:<34} {why}", v.grade, v.app);
+                }
+            } else {
+                check(
+                    &paths,
+                    theme.as_deref(),
+                    level.as_deref(),
+                    original.as_deref(),
+                )?
+            }
+        }
         Command::Colours {
             theme,
             set,
@@ -710,8 +1038,49 @@ fn cycle(favourites: bool, all: bool) -> Option<palette::favourites::Cycle> {
     }
 }
 
-fn check(paths: &Paths, theme: Option<&str>) -> Result<()> {
-    let r = palette::check::run(paths, theme)?;
+fn check(
+    paths: &Paths,
+    theme: Option<&str>,
+    level: Option<&str>,
+    original: Option<&str>,
+) -> Result<()> {
+    let name = match theme {
+        Some(t) => t.to_string(),
+        None => state::current_theme(paths)?.ok_or_else(|| {
+            anyhow::anyhow!("no theme is active yet: name one (`palette check <theme>`)")
+        })?,
+    };
+    let level = level.map(palette::normalise::Level::parse).transpose()?;
+    let original = original.map(|o| (name.as_str(), o == "on"));
+    let (level, left) = palette::readability(paths, level, original)?;
+    let r = palette::check::run(paths, Some(&name))?;
+    if left.contains(&name) {
+        println!(
+            "{name}: original colours, no readability fixes (`--original off` to fix it again)"
+        );
+    } else if level == palette::normalise::Level::Off && r.fixed.is_empty() {
+        println!("Readability fixes: off (`--level minimal` to turn them on)");
+    } else if r.fixed.is_empty() {
+        println!("Readability fixes ({}): nothing to fix", level.as_str());
+    } else {
+        println!(
+            "Readability fixes ({}), used whenever {name} is applied:",
+            level.as_str()
+        );
+        for ch in &r.fixed {
+            println!("   {}", ch.summary());
+        }
+    }
+    let lift = palette::glass::Lift::of(&palette::settings::load(paths)?, &name);
+    for (apps, changes) in &r.glass {
+        println!(
+            "Glass lift ({}) in {apps} (see-through, over this wallpaper; `--glass-lift`):",
+            lift.label()
+        );
+        for line in changes {
+            println!("   {line}");
+        }
+    }
     for issue in &r.issues {
         println!(
             "!! {:<18} on {:<18} {:>4.1}:1  needs {}  ({})",
@@ -912,6 +1281,10 @@ fn desktop(paths: &Paths, tool: Option<&str>, command: Option<DesktopCommand>) -
         Some(DesktopCommand::Manage) => desktop::manage(paths, tool)?,
         Some(DesktopCommand::Release) => desktop::release(paths, tool)?,
         Some(DesktopCommand::Apply) => desktop::set(paths, tool, desktop::get(paths, tool)?)?,
+        Some(DesktopCommand::Fit) if tool == desktop::Tool::Bar => {
+            desktop::fit_bar_to_menu_bar(paths)?
+        }
+        Some(DesktopCommand::Fit) => bail!("`fit` is for the bar: palette desktop bar fit"),
         Some(DesktopCommand::Set { pairs }) => {
             let pairs = pairs
                 .iter()
@@ -1071,14 +1444,19 @@ fn fav(paths: &Paths, command: FavCommand) -> Result<()> {
             f::set_cycle(paths, f::Cycle::parse(&what)?)?;
             println!("`palette next`/`prev` and the bar pill now step through: {what}");
         }
+        FavCommand::Scroll { on } => {
+            let on = f::set_bar_scroll(paths, on.map(|v| v == "on"))?;
+            let state = if on { "on" } else { "off" };
+            println!("Scrolling on the bar's theme pill switches theme: {state}");
+        }
     }
     Ok(())
 }
 
-fn list(paths: &Paths) -> Result<()> {
+fn list(paths: &Paths, q: &str) -> Result<()> {
     let current = state::current_theme(paths)?;
-    // Colours only for a terminal, and never when NO_COLOR is set (no-color.org).
-    let colour = std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none();
+    let colour = colour_out();
+    let mut shown = 0;
     for (name, origin) in theme::list(paths)? {
         let mark = if current.as_deref() == Some(name.as_str()) {
             "*"
@@ -1090,6 +1468,12 @@ fn list(paths: &Paths) -> Result<()> {
             Origin::User => "user",
         };
         let loaded = theme::load(paths, &name);
+        if !q.trim().is_empty() {
+            let Ok(t) = &loaded else { continue };
+            if !palette::search::matches(&name, &palette::search::tags(&t.colors), q) {
+                continue;
+            }
+        }
         let mode = match &loaded {
             Ok(t) if t.colors.mode == Mode::Light => "light",
             Ok(_) => "",
@@ -1100,8 +1484,27 @@ fn list(paths: &Paths) -> Result<()> {
             _ => String::new(),
         };
         println!("{mark} {strip}{name:<24} {origin:<8} {mode}");
+        shown += 1;
     }
+    no_match(shown, q);
     Ok(())
+}
+
+/// Colours only for a terminal, and never when NO_COLOR is set (no-color.org).
+fn colour_out() -> bool {
+    std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none()
+}
+
+/// A search that found nothing says so (on stderr), instead of printing nothing: a typo
+/// (`palette list purpel`) looked the same as an empty result.
+fn no_match(shown: usize, q: &str) {
+    if shown == 0 && !q.trim().is_empty() {
+        eprintln!(
+            "No theme matches `{}`. Words: dark, light, warm, cool, calm, vivid, mono, soft, \
+             high-contrast, colour names (red … pink), or part of a name.",
+            q.trim()
+        );
+    }
 }
 
 /// A strip of 24-bit colour blocks (terminal escape codes).
@@ -1169,10 +1572,12 @@ fn export(
     paths: &Paths,
     dir: &std::path::Path,
     no_wallpapers: bool,
+    library: Option<bool>,
     no_configs: bool,
 ) -> Result<()> {
     let options = palette::sync::ExportOptions {
         wallpapers: no_wallpapers.then_some(false),
+        library,
         configs: no_configs.then_some(false),
     };
     let r = palette::sync::export(paths, dir, &options)?;
@@ -1272,14 +1677,14 @@ fn doctor(paths: &Paths) -> Result<()> {
             (Status::Ok, false) => "ok ",
             (Status::Fix, false) => "!! ",
         };
-        println!("  {:<12} {sign} {}", row.name, row.detail);
+        println!("  {:<14} {sign} {}", row.name, row.detail);
         for note in &row.notes {
             let mark = match (note.ok, note.info) {
                 (false, _) => "!",
                 (true, true) => "i",
                 _ => " ",
             };
-            println!("  {:<12}   {mark} {}", "", note.text);
+            println!("  {:<14}   {mark} {}", "", note.text);
         }
     }
     let problems = rows.iter().filter(|r| r.needs_fix()).count();
@@ -1299,6 +1704,12 @@ fn report(s: &Switch, paths: &Paths) {
     } else {
         println!("Switched to {} -> {}", s.theme, paths.current().display());
     }
+    print_changes(s);
+    print_effects(&s.effects);
+}
+
+/// One line per file: new, changed or unchanged (and copied from the theme folder).
+fn print_changes(s: &Switch) {
     for (file, change) in &s.changes {
         let (sign, word) = match change {
             Change::New => ('+', "new"),
@@ -1312,7 +1723,6 @@ fn report(s: &Switch, paths: &Paths) {
         };
         println!("  {sign} {file:<18} {word}{note}");
     }
-    print_effects(&s.effects);
 }
 
 fn print_effects(effects: &[Effect]) {
@@ -1327,7 +1737,7 @@ fn print_effects(effects: &[Effect]) {
             Outcome::Skipped(m) => format!("-   {m}"),
             Outcome::Failed(m) => format!("!!  failed: {m}"),
         };
-        println!("  {what:<12} {line}");
+        println!("  {what:<14} {line}");
     }
 }
 
@@ -1360,9 +1770,9 @@ fn init(paths: &Paths, remove: bool, dry_run: bool) -> Result<()> {
             (Step::Off, _) => "off (your choice), skipped".to_string(),
             (Step::Manual(why), _) => format!("do by hand: {why}"),
         };
-        println!("  {:<11} {what:<30} {path}", item.target);
+        println!("  {:<14} {what:<30} {path}", item.target);
         if let Some(note) = &item.note {
-            println!("  {:<11} {note}", "");
+            println!("  {:<14} {note}", "");
         }
     }
     if let Some(dir) = &report.backup {
@@ -1375,16 +1785,17 @@ fn init(paths: &Paths, remove: bool, dry_run: bool) -> Result<()> {
     Ok(())
 }
 
-fn catalog(paths: &Paths, search: Option<&str>) {
+fn catalog(paths: &Paths, q: &str) {
     let installed: Vec<String> = palette::install::installed(paths)
         .into_iter()
         .map(|(n, _)| n)
         .collect();
-    let q = search.unwrap_or_default().to_ascii_lowercase();
-    for e in palette::catalog::entries()
-        .iter()
-        .filter(|e| e.name.contains(&q) || e.title.to_ascii_lowercase().contains(&q))
-    {
+    let colour = colour_out();
+    let mut shown = 0;
+    for e in palette::catalog::entries().iter().filter(|e| {
+        let tags = palette::search::tags(&e.colors);
+        palette::search::matches(&format!("{} {}", e.name, e.title), &tags, q)
+    }) {
         let mood = palette::colour::analyse(&e.theme(paths)).mood;
         let mark = if installed.contains(&e.name) {
             "*"
@@ -1396,10 +1807,16 @@ fn catalog(paths: &Paths, search: Option<&str>) {
             e.name,
             e.colors.mode.as_str(),
             mood.as_str(),
-            swatches(&e.theme(paths)),
+            if colour {
+                swatches(&e.theme(paths))
+            } else {
+                String::new()
+            },
             e.author
         );
+        shown += 1;
     }
+    no_match(shown, q);
     println!("\n* installed. Install one: palette install <name>");
 }
 

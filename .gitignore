@@ -20,3 +20,7 @@
 
 # Private docs and Claude Code files ARE committed, on the `private` branch.
 # Releases leave them out: see .publishignore and ~/.claude/skills/project-docs/publish.sh
+
+# Raw screen recordings and GIF options to choose from (docs/media/*.gif are the chosen ones)
+/docs/media/raw/
+/docs/media/options/

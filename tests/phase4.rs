@@ -96,54 +96,24 @@ fn thumbnails_are_cached_small_jpegs() {
     let theme = palette::theme::load(&paths, "nord").unwrap();
     assert_eq!(palette::thumbs::thumbnail(&paths, &theme).unwrap(), None);
 
-    // A real 1200×600 image: a 24-bit BMP is a 54-byte header plus pixels.
-    let raw = home.path("big.bmp");
-    std::fs::write(&raw, bmp(1200, 600)).unwrap();
+    // A real 1200×600 PNG, written with Palette's own image code (`sips` on
+    // macOS, the image crate on Linux).
     let big = home.path("big.png");
-    let made = Command::new("sips")
-        .args(["-s", "format", "png"])
-        .arg(&raw)
-        .arg("--out")
-        .arg(&big)
-        .output()
-        .unwrap();
-    assert!(made.status.success());
+    let mut picture = palette::pixels::Image::new(1200, 600);
+    picture.rgb.iter_mut().for_each(|p| *p = [40, 80, 160]);
+    palette::pixels::write(&big, &picture).unwrap();
     home.ok(&["bg", "add", "--theme", "nord", big.to_str().unwrap()]);
     let theme = palette::theme::load(&paths, "nord").unwrap();
     let thumb = palette::thumbs::thumbnail(&paths, &theme).unwrap().unwrap();
-    let info = Command::new("sips")
-        .args(["-g", "pixelWidth", "-g", "format"])
-        .arg(&thumb)
-        .output()
-        .unwrap();
-    let info = String::from_utf8_lossy(&info.stdout);
-    assert!(
-        info.contains("pixelWidth: 480") && info.contains("jpeg"),
-        "{info}"
-    );
+    let head = std::fs::read(&thumb).unwrap();
+    assert_eq!(&head[..2], b"\xff\xd8", "a JPEG");
+    let small = palette::pixels::read(&thumb, None).unwrap();
+    assert_eq!((small.width, small.height), (480, 240));
     // Second call hits the cache.
     assert_eq!(
         palette::thumbs::thumbnail(&paths, &theme).unwrap(),
         Some(thumb)
     );
-}
-
-/// A solid-colour 24-bit BMP (width × 3 must be a multiple of 4).
-fn bmp(width: u32, height: u32) -> Vec<u8> {
-    let pixels = width * height * 3;
-    let mut out = Vec::new();
-    out.extend(b"BM");
-    out.extend((54 + pixels).to_le_bytes());
-    out.extend([0u8; 4]);
-    out.extend(54u32.to_le_bytes());
-    out.extend(40u32.to_le_bytes());
-    out.extend(width.to_le_bytes());
-    out.extend(height.to_le_bytes());
-    out.extend(1u16.to_le_bytes());
-    out.extend(24u16.to_le_bytes());
-    out.extend([0u8; 24]);
-    out.extend(std::iter::repeat_n([0x46u8, 0x34, 0x2e], (width * height) as usize).flatten());
-    out
 }
 
 #[test]

@@ -19,11 +19,12 @@ use super::{File, Tool, sh_quote};
 use crate::paths::Paths;
 use crate::system::{self, Outcome};
 
-const SCRIPTS: [(&str, &str); 5] = [
+const SCRIPTS: [(&str, &str); 6] = [
     ("spaces.sh", include_str!("spaces.sh")),
     ("stats.sh", include_str!("stats.sh")),
     ("widgets.sh", include_str!("widgets.sh")),
     ("habits.sh", include_str!("habits.sh")),
+    ("dispatch.sh", include_str!("dispatch.sh")),
     ("front_app.sh", include_str!("front_app.sh")),
 ];
 
@@ -128,7 +129,7 @@ pub const KINDS: &[Kind] = &[
         ..kind(
             "weather",
             "Weather",
-            "Temperature and sky, from wttr.in (uses the network)",
+            "Temperature and sky, from Open-Meteo (uses the network)",
             "system",
             "open -a Weather",
             900,
@@ -141,6 +142,14 @@ pub const KINDS: &[Kind] = &[
         "system",
         "open 'habittracker://open?view=log'",
         30,
+    ),
+    kind(
+        "dispatch",
+        "Dispatch",
+        "Papers read today, or what you pick in Dispatch's Settings",
+        "system",
+        "open 'dispatch://open/research'",
+        60,
     ),
     kind("cpu", "CPU", "Processor use", "stats", OPEN_AM, 0),
     kind("gpu", "GPU", "Graphics use", "stats", OPEN_AM, 0),
@@ -580,12 +589,12 @@ impl Bar {
                 bail!("{what} is {lo} to {hi}, not {v}")
             }
         };
-        n(self.height, 16, 80, "height")?;
+        n(self.height, 10, 80, "height")?; // small bars are your call: the Bar page warns (owner)
         n(self.margin, 0, 400, "margin")?;
         n(self.padding, 0, 100, "padding")?;
         n(self.corner_radius, 0, 40, "corner_radius")?;
         n(self.blur_radius, 0, 100, "blur_radius")?;
-        n(self.pill.height, 10, 80, "pill height")?;
+        n(self.pill.height, 6, 80, "pill height")?;
         n(self.pill.corner_radius, 0, 40, "pill corner_radius")?;
         n(self.pill.border_width, 0, 6, "pill border_width")?;
         n(self.pill.gap, 0, 60, "pill gap")?;
@@ -705,8 +714,91 @@ pub fn scripts_dir(paths: &Paths) -> PathBuf {
 /// few for extra displays and named workspaces.
 pub const SLOTS: u8 = 12;
 
+/// "Match the menu bar" (owner, 2026-11-08): the bar as tall as the menu bar strip (`menu`
+/// points, from `system::menu_bar_height`), from the very top, pills as tall as the bar, and the
+/// text about 0.42 of it (13.5 pt in a 32 pt strip; 11 to 15 pt). Still editable afterwards.
+pub fn matched_to_menu_bar(bar: &Bar, menu: u32) -> Bar {
+    let text = ((f64::from(menu) * 0.42 * 2.0).round() / 2.0).clamp(11.0, 15.0);
+    let mut b = bar.clone();
+    b.position = "top".into();
+    b.height = menu;
+    b.y_offset = 0;
+    b.pill.height = menu;
+    b.icon_size = text;
+    b.label_size = text;
+    b
+}
+
+/// The bar's colours as they are now, written before Palette's line (which overrides them), so
+/// the bar keeps its text and pills when that line is gone (`palette init --remove`): unset, a
+/// `$C_accent` is empty and SketchyBar draws it transparent (owner, 2026-11-08). Only the
+/// colours this file uses; values from the active theme's `sketchybar.sh`.
+fn with_fallback_colours(paths: &Paths, rc: String) -> String {
+    let Ok(theme) = std::fs::read_to_string(paths.current().join("sketchybar.sh")) else {
+        return rc;
+    };
+    let mut used: Vec<&str> = Vec::new();
+    for (i, _) in rc.match_indices("C_") {
+        let before = rc[..i].chars().last();
+        if !matches!(before, Some('$') | Some('{')) {
+            continue;
+        }
+        let name_len = rc[i..]
+            .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+            .unwrap_or(rc.len() - i);
+        let name = &rc[i..i + name_len];
+        if !used.contains(&name) {
+            used.push(name);
+        }
+    }
+    let lines: Vec<String> = used
+        .iter()
+        .filter_map(|name| {
+            let value = theme
+                .lines()
+                .find_map(|l| l.strip_prefix(&format!("export {name}=")))?;
+            Some(format!("{name}={value}"))
+        })
+        .collect();
+    if lines.is_empty() {
+        return rc;
+    }
+    let block = format!(
+        "# The theme's colours when this file was written: used only if Palette's line below is\n\
+         # gone (palette init --remove), so the text and pills don't turn invisible.\n{}\n",
+        lines.join("\n")
+    );
+    let path_line = "export PATH=\"$PATH:/opt/homebrew/bin\"\n";
+    rc.replacen(path_line, &format!("{path_line}{block}"), 1)
+}
+
 /// sketchybarrc and the pill scripts.
 pub fn render(paths: &Paths, bar: &Bar) -> Result<Vec<File>> {
+    // Performance mode changes what is written, never the saved settings.
+    let saved = crate::settings::load(paths).unwrap_or_default();
+    let perf = saved.performance;
+    // The weather pill's place is Schedule's (owner, 2026-11-03), so one place changes both;
+    // without one there, the item's own (older bars have "Singapore" there), else the city
+    // the Mac's time zone suggests (Open-Meteo can't guess from the internet address).
+    let place = saved
+        .schedule
+        .location()
+        .ok()
+        .map(|(lat, lon, _)| format!("{lat:.4},{lon:.4}"));
+    let zone_city = crate::schedule::suggest_city().map(|c| format!("{:.4},{:.4}", c.lat, c.lon));
+    let mut view = bar.clone();
+    if perf.bar_now() {
+        // No blur, and nothing see-through (the pills' and the bar's colours fully opaque).
+        view.blur_radius = 0;
+        view.pill.opacity = 100;
+        view.background_opacity = 100;
+    }
+    if perf.stats_now() {
+        view.stats_every = view
+            .stats_every
+            .max(crate::settings::PERFORMANCE_STATS_EVERY);
+    }
+    let bar = &view;
     let dir = scripts_dir(paths);
     let script = |name: &str| format!("\"{}\"", paths.for_shell(&dir.join(name)));
     let mut out = String::new();
@@ -912,7 +1004,12 @@ pub fn render(paths: &Paths, bar: &Bar) -> Result<Vec<File>> {
                     }
                     "battery" | "volume" | "brightness" | "weather" => {
                         let env = if k.id == "weather" {
-                            format!("LOCATION=\"{}\" UNITS={} ", item.location, item.units)
+                            let at = place
+                                .as_deref()
+                                .or(Some(item.location.as_str()).filter(|l| !l.trim().is_empty()))
+                                .or(zone_city.as_deref())
+                                .unwrap_or("");
+                            format!("LOCATION=\"{at}\" UNITS={} ", item.units)
                         } else {
                             String::new()
                         };
@@ -946,6 +1043,19 @@ pub fn render(paths: &Paths, bar: &Bar) -> Result<Vec<File>> {
                             format!("ICON_KEY={} bash {}", bar.icon_colour, script("habits.sh"));
                         line(format!(
                             "sketchybar --add item {name} {side} --set {name} label=\"--\" update_freq={} script={}{click}{edges} \\\n  --subscribe {name} habit_tracker_update system_woke",
+                            item.every(),
+                            sh_quote(&cmd)
+                        ));
+                    }
+                    "dispatch" => {
+                        events.push("dispatch_update");
+                        let cmd = format!(
+                            "ICON_KEY={} bash {}",
+                            bar.icon_colour,
+                            script("dispatch.sh")
+                        );
+                        line(format!(
+                            "sketchybar --add item {name} {side} --set {name} label=\"--\" update_freq={} script={}{click}{edges} \\\n  --subscribe {name} dispatch_update system_woke",
                             item.every(),
                             sh_quote(&cmd)
                         ));
@@ -1059,6 +1169,7 @@ pub fn render(paths: &Paths, bar: &Bar) -> Result<Vec<File>> {
     // Events go before the items that subscribe to them.
     let marker = "\npill() {";
     let rc = out.replacen(marker, &format!("\n{events_block}{}", &marker[1..]), 1);
+    let rc = with_fallback_colours(paths, rc);
 
     let mut files = vec![File {
         path: Tool::Bar.files(paths).remove(0),
@@ -1112,7 +1223,7 @@ pub fn reload(_: &Paths) -> Outcome {
     if !system::is_running("sketchybar") {
         return Outcome::Skipped("not running".into());
     }
-    match system::run("sketchybar", &["--reload"]) {
+    match system::reload_sketchybar() {
         Ok(_) => Outcome::Done("reloaded".into()),
         Err(e) => Outcome::Failed(e),
     }

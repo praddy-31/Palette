@@ -22,5 +22,6 @@ pub const TARGET: Target = Target {
     wiring: Wiring::Shell,
     installed: |paths| super::has_app(paths, "Chess Review.app"),
     reload: |_| Outcome::Unchanged("the app follows the file live".into()),
+    platforms: super::Platforms::Mac,
     ..BASE
 };

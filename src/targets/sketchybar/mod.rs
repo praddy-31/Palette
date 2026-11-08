@@ -20,6 +20,7 @@ pub const TARGET: Target = Target {
     )),
     installed: |_| super::has_program("sketchybar"),
     reload,
+    platforms: super::Platforms::Mac,
     ..BASE
 };
 
@@ -41,7 +42,7 @@ pub(super) fn reload(_: &Paths) -> Outcome {
     if !system::is_running("sketchybar") {
         return Outcome::Skipped("not running".into());
     }
-    match system::run("sketchybar", &["--reload"]) {
+    match system::reload_sketchybar() {
         Ok(_) => Outcome::Done("reloaded".into()),
         Err(e) => Outcome::Failed(e),
     }

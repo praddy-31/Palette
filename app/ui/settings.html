@@ -10,7 +10,9 @@
   <div class="shell">
     <nav class="tabs" aria-label="Settings sections">
       <div class="tabs-title"><span class="logo"></span>Palette</div>
+      <div id="mode-line" class="tabs-mode" hidden></div>
       <button data-tab="apps" class="tab on">Apps</button>
+      <button data-tab="mine" class="tab">My themes</button>
       <button data-tab="themes" class="tab">Get themes</button>
       <button data-tab="wallpapers" class="tab">Wallpapers</button>
       <button data-tab="colours" class="tab">Colours</button>
@@ -25,6 +27,8 @@
       <button data-tab="borders" class="tab">Borders</button>
       <button data-tab="prompt" class="tab">Prompt</button>
       <button data-tab="macos" class="tab">Dock &amp; menu bar</button>
+      <div class="tabs-group">Help</div>
+      <button data-tab="guide" class="tab">Where things are</button>
     </nav>
 
     <main class="settings">
@@ -41,6 +45,21 @@
       </section>
 
       <!-- ---------------- Apps ---------------- -->
+      <section data-pane="mine" hidden>
+        <h1>My themes</h1>
+        <p class="note">Every theme you have. ★ up to ten favourites: they come first in the picker,
+          the quick switcher and the menu (also <code>palette fav</code>).</p>
+        <label class="row">
+          <div><div class="title">Next theme: favourites only</div><div class="sub">Tray Next, the bar pill's scroll and <code>palette next</code> step through your ★ themes (all themes while you have none)</div></div>
+          <input id="favs-only" type="checkbox" class="switch">
+        </label>
+        <div style="display:flex;gap:10px;align-items:center;margin:10px 0">
+          <input id="mine-search" class="search" type="text" placeholder="Search: a name, or warm, dark, blue…" autocomplete="off" spellcheck="false" style="flex:1">
+          <span id="mine-count" class="sub" style="color:var(--dim);font-size:11.5px"></span>
+        </div>
+        <div id="mine"></div>
+      </section>
+
       <section data-pane="apps">
         <h1>Themed apps</h1>
         <p class="note">Everything is on by default. Switch an app off to keep its own look:
@@ -55,7 +74,7 @@
           The list is built in, so browsing stays offline; Install downloads that one theme.
           Palette takes only its colours, wallpapers and preview, never config files or scripts.</p>
         <div class="gt-bar">
-          <input id="gt-search" class="search" type="text" placeholder="Search themes" autocomplete="off" spellcheck="false">
+          <input id="gt-search" class="search" type="text" placeholder="Search: a name, or warm, dark, blue…" autocomplete="off" spellcheck="false">
           <select id="gt-filter" class="select">
             <option value="">All</option>
             <option value="colourful">Colourful</option>
@@ -64,6 +83,7 @@
             <option value="light">Light</option>
             <option value="installed">Installed</option>
           </select>
+          <button id="gt-sheet" class="btn" title="Every theme here as made and with Palette's fixes, side by side, on one page in your browser (offline; also palette catalog --sheet)">Inspection sheet</button>
         </div>
         <div id="gt-grid" class="gt-grid"></div>
         <h2>From a link</h2>
@@ -153,6 +173,7 @@
           <div><div class="title">Theme</div><div class="sub" id="co-sub"></div></div>
           <select id="co-theme" class="select"></select>
         </div>
+        <label class="co-withfix"><input id="co-withfix" type="checkbox" checked> Preview with Palette's readability fixes (what your apps get)</label>
         <div id="co-preview" class="co-preview"></div>
         <h2>Readability</h2>
         <div id="co-check"></div>
@@ -185,7 +206,7 @@
           <button id="refresh" class="btn">Re-apply</button>
         </div>
         <div class="row">
-          <div><div class="title">Remove Palette from all configs</div><div class="sub">Every app back exactly as before Palette; your themes and wallpapers stay</div></div>
+          <div><div class="title">Remove Palette from all configs</div><div class="sub">Every app back exactly as before Palette; your themes and wallpapers stay. Obsidian keeps Palette's colours until you reopen it (or switch off Settings → Appearance → CSS snippets → palette)</div></div>
           <button id="remove-all" class="btn danger">Remove…</button>
         </div>
         <h2>Check</h2>
@@ -200,14 +221,18 @@
 
       <!-- ---------------- Move ---------------- -->
       <section data-pane="move" hidden>
-        <h1>Move to another Mac</h1>
+        <h1 id="move-title">Move to another Mac</h1>
         <p class="note">Export makes a plain folder with your themes and settings (and, if you like,
-          wallpapers and app configs). Copy it over with AirDrop, a USB stick or a private git repo,
-          then Import it on the other Mac.</p>
+          wallpapers and app configs). Copy it over with <span id="move-how">AirDrop, </span>a USB stick or a private git repo,
+          then Import it on the other <span id="move-other">Mac</span>.</p>
         <h2>Export</h2>
         <label class="row">
           <div><div class="title">Include wallpapers</div><div class="sub">Every theme's backgrounds</div></div>
           <input id="exp-walls" type="checkbox" class="switch">
+        </label>
+        <label class="row">
+          <div><div class="title">Include the wallpaper library</div><div class="sub">Every picture in Wallpapers → Library (can be large; off unless sync.toml says <code>library = true</code>)</div></div>
+          <input id="exp-library" type="checkbox" class="switch">
         </label>
         <label class="row">
           <div><div class="title">Include app configs</div><div class="sub" id="configs-sub"></div></div>
@@ -233,10 +258,43 @@
           <span id="hotkey" class="keycap"></span>
           <button id="record" class="btn">Change…</button>
         </div>
-        <label class="row">
-          <div><div class="title">Next theme: favourites only</div><div class="sub">Tray Next, the bar pill's scroll and <code>palette next</code> step through your ★ themes (all themes while you have none)</div></div>
-          <input id="favs-only" type="checkbox" class="switch">
+        <div id="hotkey-linux" class="row" hidden>
+          <div><div class="title">Quick switch shortcut</div><div class="sub">Your desktop runs it: apps can't grab keys on Wayland. Set it up once:</div>
+            <pre id="hotkey-hint" class="hint"></pre></div>
+          <button id="hotkey-copy" class="btn">Copy</button>
+        </div>
+        <div class="row">
+          <div><div class="title">Menu bar click opens</div><div class="sub">The bar's theme pill opens the same (the quick switcher for the menu). Right-click the icon for the menu any time</div></div>
+          <select id="menu-click" class="select">
+            <option value="menu">Menu</option>
+            <option value="picker">Picker</option>
+            <option value="quick-switcher">Quick switcher</option>
+          </select>
+        </div>
+        <div class="row">
+          <div><div class="title">Windows</div><div class="sub">Less memory on demand: windows open in about a second and close a minute after hiding. On demand keeps the quick switcher ready; Everything on demand doesn't</div></div>
+          <select id="app-windows" class="select">
+            <option value="ready">Keep ready</option>
+            <option value="on-demand">Load on demand</option>
+            <option value="all-on-demand">Everything on demand</option>
+          </select>
+        </div>
+        <label class="row" id="idle-settings-row">
+          <div><div class="title">Close Settings when idle</div><div class="sub">On demand: close this window after 10 minutes without focus, even while it's open (say, on another workspace). Changes are already saved</div></div>
+          <input id="idle-settings" type="checkbox" class="switch">
         </label>
+        <label class="row">
+          <div><div class="title">Monochrome themes: spaced greys</div><div class="sub">In themes whose terminal colours are all grey (ash, frost), spread them apart in lightness so a diff's red and green, or ls's blue and cyan, never look the same</div></div>
+          <input id="mono-greys" type="checkbox" class="switch">
+        </label>
+        <label class="row">
+          <div><div class="title">Monochrome themes: a faint tint</div><div class="sub">Give those terminal colours a hint of the theme's own hue, red nudged warm and green cool, so diffs read as diffs. Off keeps them grey</div></div>
+          <input id="mono-tint" type="checkbox" class="switch">
+        </label>
+        <div class="row">
+          <div><div class="title">Keep a log</div><div class="sub">One line per theme switch (time, theme, what failed) in palette.log, on this Mac only. For when something looks odd</div></div>
+          <div style="display:flex;gap:8px;align-items:center"><button id="log-show" class="btn">Show</button><input id="log-on" type="checkbox" class="switch"></div>
+        </div>
         <label class="row">
           <div><div class="title">Open at login</div><div class="sub">Starts quietly in the menu bar</div></div>
           <input id="login" type="checkbox" class="switch">
@@ -256,7 +314,7 @@
         </div>
       </section>
 
-      <!-- ---------------- Desktop: bar, windows, borders (desktop.* in app.js) ---------------- -->
+      <!-- ---------------- Desktop: bar, windows, borders (desktop.* in desktop.js) ---------------- -->
       <section data-pane="bar" hidden>
         <h1>Bar</h1>
         <p class="note">Your SketchyBar, built from pills. Drag items to reorder them or move them between pills, Pill ◀ ▶ moves a whole pill,
@@ -287,7 +345,71 @@
         <div id="dk-macos"></div>
       </section>
 
-      <!-- ---------------- Schedule ---------------- -->
+      <!-- ---------------- Where things are ---------------- -->
+      <section data-pane="guide" hidden>
+        <h1>Where things are</h1>
+        <p class="note">Each look setting lives next to what it changes. Click a place to go there; every one is also a terminal command.</p>
+        <h2>See-through windows (glass)</h2>
+        <div class="guide">
+          <div><span>How see-through each app is: Ghostty, kitty, Alacritty, WezTerm, Dispatch, EasyPlots, Habit Tracker</span><button class="link" data-go="apps">Apps → that app's Glass</button><code>palette glass &lt;app&gt;</code></div>
+          <div class="mac-only"><span>Zed: opaque, blurred or clear glass, and how much</span><button class="link" data-go="apps">Apps → Zed</button><code>palette zed clear</code></div>
+          <div><span>How much text is lifted to read on glass, per theme</span><button class="link" data-go="mine">My themes → Glass lift (Colours shows what it lifts)</button><code>palette check &lt;theme&gt; --glass-lift auto|0-100</code></div>
+          <div><span>Obsidian: an accent ring on the active pane, the others faded</span><button class="link" data-go="apps">Apps → Obsidian</button><code>palette obsidian</code></div>
+          <div class="mac-only"><span>Everything solid and plainer, for speed</span><button class="link" data-go="apps">Apps → Performance (also the menu bar menu)</button><code>palette performance</code></div>
+        </div>
+        <h2>Colours</h2>
+        <div class="guide">
+          <div><span>How hard Palette fixes faint colours: Off, Minimal, Strong; a theme left as its author made it</span><button class="link" data-go="colours">Colours → Readability fixes</button><code>palette check --level, --original</code></div>
+          <div><span>Change a theme's colours, or undo your changes</span><button class="link" data-go="colours">Colours</button><code>palette colours</code></div>
+          <div><span>How a theme works in terminals, editors, lists and Palette's windows</span><button class="link" data-go="colours">Colours → each kind of app</button><code>palette check --app</code></div>
+          <div><span>Grey themes (ash, frost): greys spaced apart, a faint tint</span><button class="link" data-go="general">General → Monochrome themes</button><code>palette check --greys, --tint</code></div>
+        </div>
+        <h2>Themes and switching</h2>
+        <div class="guide">
+          <div><span>★ favourites, and whether Next steps through only them</span><button class="link" data-go="mine">My themes → Next theme: favourites only</button><code>palette fav</code></div>
+          <div class="mac-only"><span>Scroll on the bar's theme pill to switch theme</span><button class="link" data-go="bar">Bar → Scroll on it to switch theme (beside Palette's theme pill)</button><code>palette fav scroll on|off</code></div>
+          <div><span>A day theme and a night theme</span><button class="link" data-go="schedule">Schedule</button><code>palette schedule</code></div>
+          <div><span>The quick switch shortcut; what a menu bar click opens</span><button class="link" data-go="general">General → Quick switch shortcut, Menu bar click opens</button><code>palette hotkey, palette ui --click</code></div>
+          <div><span>More themes from the community</span><button class="link" data-go="themes">Get themes</button><code>palette catalog, palette install</code></div>
+        </div>
+        <h2>Wallpapers</h2>
+        <div class="guide">
+          <div><span>Pick, add, recolour or generate wallpapers</span><button class="link" data-go="wallpapers">Wallpapers</button><code>palette bg</code></div>
+          <div><span>A new theme from a picture</span><button class="link" data-go="wallpapers">Wallpapers → New theme from a wallpaper</button><code>palette new</code></div>
+        </div>
+        <h2>Desktop (Mac)</h2>
+        <div class="guide">
+          <div class="mac-only"><span>SketchyBar: pills, items, colours</span><button class="link" data-go="bar">Bar</button><code>palette desktop bar</code></div>
+          <div class="mac-only"><span>AeroSpace: gaps, layout, keyboard shortcuts</span><button class="link" data-go="windows">Windows</button><code>palette desktop windows</code></div>
+          <div class="mac-only"><span>JankyBorders: width, glow, colours</span><button class="link" data-go="borders">Borders</button><code>palette desktop borders</code></div>
+          <div><span>Starship prompt</span><button class="link" data-go="prompt">Prompt</button><code>palette desktop prompt</code></div>
+          <div class="mac-only"><span>Dock and menu bar hiding</span><button class="link" data-go="macos">Dock &amp; menu bar</button><code>palette desktop macos</code></div>
+        </div>
+        <h2>Apps, setup and this Mac</h2>
+        <div class="guide">
+          <div><span>Which apps follow the theme</span><button class="link" data-go="apps">Apps</button><code>palette apps</code></div>
+          <div><span>Point your apps at Palette, take it out again, check everything is wired</span><button class="link" data-go="setup">Setup</button><code>palette init, palette init --remove, palette doctor</code></div>
+          <div class="mac-only"><span>Install SketchyBar, JankyBorders, AeroSpace with starter configs</span><button class="link" data-go="tools">Get the tools</button><code>palette tools</code></div>
+          <div><span>Copy your setup to another Mac</span><button class="link" data-go="move">Move to another Mac</button><code>palette export, palette import</code></div>
+          <div><span>How long Palette's windows stay loaded (memory)</span><button class="link" data-go="general">General → Windows</button><code>palette ui --windows</code></div>
+          <div><span>A log of theme switches, for when something looks odd</span><button class="link" data-go="general">General → Keep a log</button><code>palette log</code></div>
+        </div>
+        <h2>Keyboard</h2>
+        <p class="note">Settings works without the mouse. Letters and numbers do nothing while you type in a box; press ? any time for this list.</p>
+        <div class="guide keys-guide">
+          <div><span>Go to a tab: Apps, My themes, Get themes, Wallpapers, Colours, Get the tools, Setup, Move to another Mac, General, Schedule</span><kbd>1 … 9, 0</kbd></div>
+          <div class="mac-only"><span>Windows, Bar, Borders, Prompt, Dock &amp; menu bar</span><kbd>W  B  J  P  D</kbd></div>
+          <div><span>Where things are (this page)</span><kbd>H</kbd></div>
+          <div><span>Previous / next tab</span><kbd>⌘[  ⌘]</kbd></div>
+          <div><span>Through the tabs (in the list); setting to setting on a page; through the themes on My themes</span><kbd>↑ ↓</kbd></div>
+          <div><span>Leave a box, menu or control, so letters and numbers are shortcuts again</span><kbd>Esc</kbd></div>
+          <div><span>From the page to the tab list, and back</span><kbd>← →</kbd></div>
+          <div><span>My themes: use the chosen theme, star it</span><kbd>↩  F</kbd></div>
+          <div><span>Search (My themes, Get themes), or the theme menu (Colours, Wallpapers)</span><kbd>/  ⌘F</kbd></div>
+          <div><span>All shortcuts (Esc closes the list)</span><kbd>?</kbd></div>
+          <div><span>Close Settings</span><kbd>⌘W</kbd></div>
+        </div>
+      </section>
       <section data-pane="schedule" hidden>
         <h1>Schedule</h1>
         <p class="note">A day theme from sunrise and a night theme from sunset, worked out on this Mac. No network and no Location permission.</p>
@@ -348,7 +470,19 @@
     </main>
   </div>
   <div id="toast" class="toast" role="status"></div>
-  <script src="app.js"></script>
+  <footer class="keys-strip" aria-hidden="true"><span><kbd>1–0</kbd> tabs</span><span class="mac-only"><kbd>WBJPD</kbd> desktop</span><span><kbd>H</kbd> help</span><span><kbd>↑↓←→</kbd> move</span><span><kbd>/</kbd> search</span><span><kbd>esc</kbd> leave a box</span><span><kbd>?</kbd> keys</span></footer>
+  <script src="look.js"></script>
+  <script src="shared.js"></script>
+  <script src="settings.js"></script>
+  <script src="settings-colours.js"></script>
+  <script src="settings-tools.js"></script>
+  <script src="settings-themes.js"></script>
+  <script src="settings-mine.js"></script>
+  <script src="settings-wallpapers.js"></script>
+  <script src="settings-setup.js"></script>
+  <script src="welcome.js"></script>
+  <script src="schedule.js"></script>
   <script src="desktop.js"></script>
+  <script src="settings-keys.js"></script>
 </body>
 </html>
