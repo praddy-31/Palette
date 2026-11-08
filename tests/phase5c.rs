@@ -145,6 +145,16 @@ fn old_themes_without_colors_toml_use_alacritty() {
         "solar",
     ]);
     assert!(out.contains("colours from alacritty.toml"), "{out}");
+    // Roles guessed from the terminal colours: marked, so the fixes rank them (11e).
+    let colours = home.read(".config/palette/themes/solar/colors.toml");
+    assert!(
+        colours
+            .lines()
+            .nth(1)
+            .unwrap()
+            .starts_with("# Roles guessed"),
+        "{colours}"
+    );
     home.ok(&["set", "solar"]);
     assert!(
         !home

@@ -135,6 +135,17 @@ pub fn import(paths: &Paths) -> (Borders, Vec<String>) {
 }
 
 pub fn render(paths: &Paths, b: &Borders) -> Result<Vec<File>> {
+    let mut view = b.clone();
+    // Performance mode: no glow, normal resolution (the saved settings stay as they are).
+    if crate::settings::load(paths)
+        .unwrap_or_default()
+        .performance
+        .borders_now()
+    {
+        view.blur_radius = 0.0;
+        view.hidpi = false;
+    }
+    let b = &view;
     let mut options = vec![
         format!("style={}", b.style),
         format!("width={:.1}", b.width),
@@ -237,6 +248,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "macos")] // the Mac's targets / CoreText fonts
     fn renders_options_colours_and_the_palette_line() {
         let (_h, paths) = home(OWNER);
         let b = Borders {

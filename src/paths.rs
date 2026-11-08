@@ -84,9 +84,17 @@ impl Paths {
         self.root.join("backup")
     }
 
-    /// Path of the wallpaper Palette last set.
+    /// Path of the wallpaper Palette last set. Each Linux desktop keeps its
+    /// own wallpaper, so each gets its own record (`wallpaper-gnome`): one
+    /// shared record made a switch in GNOME trust a picture set in Noctalia.
+    /// A fake home only records, so it keeps the one name.
     pub fn wallpaper_state(&self) -> PathBuf {
-        self.root.join("wallpaper")
+        use crate::system::session::Session;
+        match Session::detect() {
+            Session::Mac => self.root.join("wallpaper"),
+            _ if self.fake => self.root.join("wallpaper"),
+            session => self.root.join(format!("wallpaper-{}", session.id())),
+        }
     }
 
     /// How a shell script should spell `path`: `$HOME/...` when it is inside

@@ -35,8 +35,10 @@ fn every_bundled_theme_writes_a_valid_wezterm_file() {
         home.ok(&["set", theme]);
         let text = home.current_file("wezterm.lua");
         let body: Vec<&str> = text.lines().filter(|l| !l.starts_with("--")).collect();
-        assert_eq!(body.first(), Some(&"return {"), "{theme}");
-        assert_eq!(body.last(), Some(&"}"), "{theme}");
+        // Two values: the colours, then window settings (empty: no glass chosen).
+        assert_eq!(body.first(), Some(&"local window = {"), "{theme}");
+        assert!(body.contains(&"return {"), "{theme}");
+        assert_eq!(body.last(), Some(&"}, window"), "{theme}");
         for key in [
             "foreground",
             "background",
@@ -100,10 +102,11 @@ fn init_wires_wezterm_once_and_removes_cleanly() {
     assert!(wired.contains("-- Added by palette init"), "{wired}");
     let line = wired
         .lines()
-        .find(|l| l.starts_with("pcall(function() config.colors = dofile("))
+        .find(|l| l.starts_with("pcall(function() local colors, window = dofile("))
         .expect("import line");
     assert!(line.contains("current/wezterm.lua"), "{line}");
     assert!(line.contains("add_to_config_reload_watch_list"), "{line}");
+    assert!(line.contains("config[k] = v"), "{line}");
     // Before the return, after the user's colour scheme (so Palette wins).
     let at = |s: &str| wired.find(s).unwrap();
     assert!(at("color_scheme") < at("pcall(") && at("pcall(") < at("return config"));
@@ -128,4 +131,48 @@ fn a_config_returning_a_table_is_left_to_the_user() {
     let out = home.ok(&["init"]);
     assert!(out.contains("do by hand"), "{out}");
     assert_eq!(fs::read_to_string(&rc).unwrap(), text);
+}
+
+/// Glass (`palette glass wezterm`) goes into the second value; a config wired
+/// by a Palette from before glass gets the new line from `init`, in place.
+#[test]
+fn glass_and_the_line_from_before_glass() {
+    let home = Home::new();
+    let generated = home.palette_dir().join("current/wezterm.lua");
+    let watch = home.palette_dir();
+    let old = format!(
+        "local wezterm = require 'wezterm'\nlocal config = wezterm.config_builder()\n\
+         -- Added by palette init (undo: palette init --remove)\n\
+         pcall(function() config.colors = dofile(\"{}\"); require(\"wezterm\").add_to_config_reload_watch_list(\"{}\") end)\n\
+         return config\n",
+        generated.display(),
+        watch.display()
+    );
+    let rc = home.write(".config/wezterm/wezterm.lua", &old);
+    home.ok(&["set", "tokyo-night"]);
+    home.ok(&["init"]);
+    let wired = fs::read_to_string(&rc).unwrap();
+    assert_eq!(wired.matches("Added by palette init").count(), 1, "{wired}");
+    assert!(wired.contains("local colors, window = dofile("), "{wired}");
+    assert!(!wired.contains("config.colors = dofile("), "{wired}");
+
+    let out = home.ok(&[
+        "glass",
+        "wezterm",
+        "blurred",
+        "--strength",
+        "30",
+        "--blur",
+        "40",
+    ]);
+    assert!(out.contains("blurred"), "{out}");
+    let text = home.current_file("wezterm.lua");
+    assert!(text.contains("window_background_opacity = 0.70,"), "{text}");
+    assert!(
+        text.contains("macos_window_background_blur = 40,"),
+        "{text}"
+    );
+    home.ok(&["glass", "wezterm", "own"]);
+    let text = home.current_file("wezterm.lua");
+    assert!(!text.contains("window_background_opacity"), "{text}");
 }

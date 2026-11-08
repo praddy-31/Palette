@@ -1,10 +1,14 @@
-//! WezTerm. Palette writes `current/wezterm.lua`, a Lua file returning a
-//! `colors` table, and `palette init` adds one line before the user's
-//! `return config`:
+//! WezTerm. Palette writes `current/wezterm.lua`, a Lua file returning two
+//! values, a `colors` table and a table of window settings (glass, `palette
+//! glass wezterm`; empty unless chosen in Palette), and `palette init` adds
+//! one line before the user's `return config`:
 //!
 //! ```lua
-//! pcall(function() config.colors = dofile("…/current/wezterm.lua"); … end)
+//! pcall(function() local colors, window = dofile("…/current/wezterm.lua"); config.colors = colors; for k, v in pairs(window or {}) do config[k] = v end; … end)
 //! ```
+//!
+//! A line from before glass (`config.colors = dofile(…)`) still works, as Lua
+//! keeps only the first value there; `init` swaps it for the new one.
 //!
 //! `pcall` keeps WezTerm starting if Palette is gone. The same line adds
 //! Palette's folder to WezTerm's reload watch list, so a switch (which swaps
@@ -16,7 +20,10 @@ use std::path::{Path, PathBuf};
 use super::{BASE, Note, Output, Target};
 use crate::paths::Paths;
 use crate::system::Outcome;
-use crate::wiring::{Import, Wiring};
+use crate::wiring::{Import, MARKER, Wiring};
+
+/// How the line from before glass (2026-11-01) starts.
+const OLD_LINE: &str = "pcall(function() config.colors = dofile(";
 
 pub const TARGET: Target = Target {
     name: "wezterm",
@@ -65,14 +72,15 @@ fn lua_string(path: &Path) -> String {
         .replace('"', "\\\"")
 }
 
-/// Set the colours and watch Palette's folder, all inside `pcall`.
+/// Set the colours and window settings and watch Palette's folder, all
+/// inside `pcall`.
 fn line(_: &Paths, generated: &Path) -> String {
     let watch = generated
         .parent()
         .and_then(Path::parent)
         .unwrap_or(generated);
     format!(
-        "pcall(function() config.colors = dofile(\"{}\"); require(\"wezterm\").add_to_config_reload_watch_list(\"{}\") end)",
+        "pcall(function() local colors, window = dofile(\"{}\"); config.colors = colors; for k, v in pairs(window or {{}}) do config[k] = v end; require(\"wezterm\").add_to_config_reload_watch_list(\"{}\") end)",
         lua_string(generated),
         lua_string(watch)
     )
@@ -93,11 +101,28 @@ fn final_return(contents: &str) -> Option<(usize, &str)> {
     is_name.then_some((i, name))
 }
 
+/// The index of the line from before glass, if Palette's marker is above it.
+fn old_line(contents: &str) -> Option<usize> {
+    let lines: Vec<&str> = contents.lines().collect();
+    lines
+        .windows(2)
+        .position(|w| w[0].trim_end().ends_with(MARKER) && w[1].trim_start().starts_with(OLD_LINE))
+        .map(|i| i + 1)
+}
+
 /// Put the block right before the final `return config`, so Palette's colours
 /// win over a `color_scheme` set earlier. A config that returns a table
-/// literal, or a variable not called `config`, is left to the user.
+/// literal, or a variable not called `config`, is left to the user. A line
+/// from an older Palette is replaced where it is.
 fn before_return(contents: &str, block: &str) -> Result<String, String> {
     let line = block.lines().last().unwrap_or_default();
+    if let Some(i) = old_line(contents) {
+        let mut lines: Vec<String> = contents.split_inclusive('\n').map(String::from).collect();
+        let indent: String = lines[i].chars().take_while(|c| c.is_whitespace()).collect();
+        let end = if lines[i].ends_with('\n') { "\n" } else { "" };
+        lines[i] = format!("{indent}{line}{end}");
+        return Ok(lines.concat());
+    }
     match final_return(contents) {
         Some((i, "config")) => {
             let mut lines: Vec<String> = contents.split_inclusive('\n').map(String::from).collect();
@@ -121,6 +146,9 @@ fn doctor(paths: &Paths) -> Vec<Note> {
         )];
     }
     match config.first().and_then(|p| std::fs::read_to_string(p).ok()) {
+        Some(text) if old_line(&text).is_some() => vec![Note::fix(
+            "wezterm.lua has the line from an older Palette (colours only): run `palette init` to update it for window glass",
+        )],
         Some(text) if final_return(&text).is_none_or(|(_, n)| n != "config") => {
             vec![Note::fix(
                 "wezterm.lua doesn't end with `return config`: `palette init` shows the line to add by hand",
@@ -142,6 +170,33 @@ mod tests {
         // Trailing comments and blank lines after the return are fine.
         let out = before_return("local config = {}\nreturn config\n\n-- end\n", "B").unwrap();
         assert_eq!(out, "local config = {}\nB\nreturn config\n\n-- end\n");
+    }
+
+    #[test]
+    fn replaces_the_line_from_before_glass() {
+        let old = format!(
+            "local config = {{}}\n  -- {MARKER}\n  {OLD_LINE}\"/p/current/wezterm.lua\"); end)\nreturn config\n"
+        );
+        assert!(old_line(&old).is_some());
+        let block = format!("-- {MARKER}\nNEW");
+        let out = before_return(&old, &block).unwrap();
+        assert_eq!(
+            out,
+            format!("local config = {{}}\n  -- {MARKER}\n  NEW\nreturn config\n")
+        );
+        assert!(old_line(&out).is_none());
+
+        let home = tempfile::tempdir().unwrap();
+        let paths = Paths::fake_home(home.path());
+        let rc = home.path().join(".wezterm.lua");
+        std::fs::write(&rc, &old).unwrap();
+        assert!(
+            doctor(&paths)
+                .iter()
+                .any(|n| n.text.contains("older Palette"))
+        );
+        std::fs::write(&rc, &out).unwrap();
+        assert!(doctor(&paths).is_empty());
     }
 
     #[test]

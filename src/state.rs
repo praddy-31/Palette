@@ -119,6 +119,43 @@ pub fn replace_file(paths: &Paths, file: &OutputFile) -> Result<()> {
     fs::rename(&tmp, dir.join(file.name)).with_context(|| format!("updating {}", file.name))
 }
 
+/// A cheap fingerprint of what Settings shows (14b): the active generation and when each of
+/// Palette's files last changed. Settings compares it on focus and redraws only when it
+/// differs, instead of redrawing at every AeroSpace hop. A setting re-rendered in place
+/// renames a file inside the generation, which changes the generation folder's time too.
+pub fn stamp(paths: &Paths) -> String {
+    let root = paths.root();
+    let theme = current_theme(paths).ok().flatten().unwrap_or_default();
+    let theme_dir = paths.themes().join(&theme);
+    let mut parts = vec![
+        fs::read_link(paths.current())
+            .map(|p| p.display().to_string())
+            .unwrap_or_default(),
+    ];
+    for path in [
+        root.join("settings.toml"),
+        root.join("sync.toml"),
+        root.join("recent"),
+        paths.wallpaper_state(),
+        paths.current().join("."), // the generation folder (follows the link)
+        paths.themes(),
+        theme_dir.join("edits.toml"),
+        theme_dir.join("backgrounds"),
+        theme_dir,
+        root.join("wallpapers"),
+        root.join("desktop"),
+    ] {
+        parts.push(
+            fs::metadata(&path)
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                .map_or_else(|| "-".to_string(), |d| d.as_nanos().to_string()),
+        );
+    }
+    parts.join("|")
+}
+
 /// `<13-digit millis>-<theme>`: sorts by time as plain text. The number is
 /// always above the newest existing generation's, so two switches in the
 /// same millisecond (scrolling the bar item) still sort in the order they

@@ -1,0 +1,23 @@
+{
+  "palette": 1,
+  "theme": "{{ theme }}",
+  "mode": "{{ mode }}",
+  "background": "{{ background }}",
+  "dark_background": "{{ dark_background }}",
+  "lighter_background": "{{ lighter_background }}",
+  "selection": "{{ selection }}",
+  "muted": "{{ muted }}",
+  "foreground": "{{ foreground }}",
+  "dark_foreground": "{{ dark_foreground }}",
+  "light_foreground": "{{ light_foreground }}",
+  "bright_foreground": "{{ bright_foreground }}",
+  "accent": "{{ accent }}",
+  "red": "{{ red }}",
+  "orange": "{{ orange }}",
+  "yellow": "{{ yellow }}",
+  "green": "{{ green }}",
+  "cyan": "{{ cyan }}",
+  "blue": "{{ blue }}",
+  "magenta": "{{ magenta }}",
+  "glass": {% set g = glass.easyplots %}{ "kind": "{{ g.kind }}", "opacity": {{ g.opacity }}, "blur": {{ g.blur }} }
+}

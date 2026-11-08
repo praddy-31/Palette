@@ -17,6 +17,7 @@ pub const TARGET: Target = Target {
     installed: |_| super::has_program("borders"),
     reload,
     unload: Some(unload),
+    platforms: super::Platforms::Mac,
     ..BASE
 };
 

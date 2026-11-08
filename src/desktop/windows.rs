@@ -40,6 +40,12 @@ pub struct Gaps {
     /// display doesn't). Written as AeroSpace's per-monitor value:
     /// `[{ monitor."built-in" = top }, other]`.
     pub outer_top_other: Option<i64>,
+    /// With `outer_top_other`: "Match the MacBook screen" — the bar Palette manages (its reach)
+    /// plus Top, so windows start as far below the bar on every display as on the MacBook,
+    /// whose Top counts from below the menu bar strip the bar sits in (owner, 2026-11-08: Top 4
+    /// → 36 with a 32 pt bar). Worked out each time the file is written, so a new bar size or
+    /// Top never leaves a stale number. Off: `outer_top_other` as typed. (Saved name kept.)
+    pub follow_bar: bool,
 }
 
 impl Default for Gaps {
@@ -51,6 +57,7 @@ impl Default for Gaps {
             outer_right: 10,
             outer_top: 48,
             outer_top_other: None,
+            follow_bar: true,
             outer_bottom: 10,
         }
     }
@@ -622,10 +629,18 @@ fn top_per_display(item: &Item) -> Option<(i64, i64)> {
 
 /// Equal as values, whatever the quoting: `'tiles'` and `"tiles"`.
 fn same(a: &toml_edit::Value, b: &toml_edit::Value) -> bool {
+    use toml_edit::Value::{Array, InlineTable};
     match (a, b) {
-        (toml_edit::Value::Array(x), toml_edit::Value::Array(y)) => {
+        (Array(x), Array(y)) => {
             x.len() == y.len() && x.iter().zip(y.iter()).all(|(p, q)| same(p, q))
         }
+        // `{ monitor."built-in" = 4 }`: key by key. Without this arm the scalar test below took
+        // any two tables for equal (none of them is a string or number), so a new per-display
+        // gap was never written.
+        (InlineTable(x), InlineTable(y)) => {
+            x.len() == y.len() && x.iter().all(|(k, v)| y.get(k).is_some_and(|w| same(v, w)))
+        }
+        (Array(_) | InlineTable(_), _) | (_, Array(_) | InlineTable(_)) => false,
         _ => {
             a.type_name() == b.type_name()
                 && a.as_str() == b.as_str()
@@ -656,6 +671,11 @@ pub fn render(paths: &Paths, w: &Windows) -> Result<(Vec<File>, Vec<String>)> {
     let mut warnings = Vec::new();
 
     let gaps = &w.gaps;
+    // Matching the MacBook screen: the bar's reach plus Top, as they are now.
+    let other = gaps.outer_top_other.map(|typed| match gaps.follow_bar {
+        true => super::bar_reach(paths).map_or(typed, |reach| reach + gaps.outer_top),
+        false => typed,
+    });
     for (v, path) in [
         (gaps.inner_horizontal, ["gaps", "inner", "horizontal"]),
         (gaps.inner_vertical, ["gaps", "inner", "vertical"]),
@@ -671,7 +691,7 @@ pub fn render(paths: &Paths, w: &Windows) -> Result<(Vec<File>, Vec<String>)> {
         if !ours {
             continue; // per monitor in a way of your own: yours
         }
-        match gaps.outer_top_other.filter(|o| path[2] == "top" && *o != v) {
+        match other.filter(|o| path[2] == "top" && *o != v) {
             Some(other) => {
                 if top_per_display(item) != Some((v, other)) {
                     let snippet: DocumentMut =
@@ -1166,6 +1186,22 @@ mod tests {
             (back.gaps.outer_top, back.gaps.outer_top_other),
             (4, Some(40))
         );
+        // A new MacBook gap with the same other-display gap: written again (the owner's 24 → 4
+        // stayed 24: `same` took any two `{ monitor… }` tables for equal, so nothing was written).
+        w.gaps.outer_top = 24;
+        let text = &render(&paths, &w).unwrap().0[0].text;
+        assert!(
+            text.contains("gaps.outer.top    = [{ monitor.\"built-in\" = 24 }, 40]\n"),
+            "{text}"
+        );
+        fs::write(config_file(&paths), text).unwrap();
+        w.gaps.outer_top = 4;
+        let text = &render(&paths, &w).unwrap().0[0].text;
+        assert!(
+            text.contains("gaps.outer.top    = [{ monitor.\"built-in\" = 4 }, 40]\n"),
+            "{text}"
+        );
+        fs::write(config_file(&paths), text).unwrap();
         // Same on every display again: a plain number.
         w.gaps.outer_top_other = None;
         assert!(

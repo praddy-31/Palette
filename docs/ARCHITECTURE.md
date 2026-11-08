@@ -1,10 +1,5 @@
 # Palette: architecture
 
-A map of how Palette works today (October 2026, after Phase 6 and the 1.1 round). It describes the code
-as it is, not the plan. File references are `path:line` so you can jump straight there.
-Weak spots and suggested improvements are in section 14.
-
----
 
 ## 1. Summary
 
@@ -49,7 +44,7 @@ Both only call the library.
 | `state.rs` | Writes generations and swaps the `current` symlink atomically; undo | `apply` (`src/state.rs:64`), `replace_file` (`:115`), `diff` (`:46`), `current_theme` (`:36`), `step_back` (`:179`), keeps 5 generations |
 | `wiring.rs` | `palette init`: adds or removes the one line in each app's config, changes one-setting apps, takes backups | `Wiring` (`src/wiring.rs:27`), `Import` (`:38`), `Setting` (`:57`), `run` / `run_for` (`:341`, `:361`), `has_block` / `remove_block` (`:213`, `:222`), `Step` (`:242`), `is_wired` (`:285`), `new_backup_dir` / `remove_old_backups` (`:655`, `:669`), keeps 5 backups |
 | `effects.rs` | Everything after the files are written: reload apps, set light/dark, choose and set the wallpaper | `apply` (`src/effects.rs:22`), `Reloads` (`:72`, dedupes shared reloads), `wallpaper_effect` (`:123`, checks the Wallpaper setting *before* anything is chosen; real and fake homes both use it), `theme_wallpaper` (`:141`), `default_wallpaper` / `set_default_wallpaper` (`:161`, `:169`), `set_wallpaper` (`:193`), `step_wallpaper` (`:216`), `add_wallpapers` / `remove_wallpaper` (`:236`, `:273`) |
-| `system.rs` | The only module that runs programs or touches macOS | `Outcome` (`src/system.rs:9`), `run` / `run_in` (`:70`, `:75`, adds Homebrew folders to `PATH`), `find_program` / `find_all_programs` (`:63`, `:45`), `is_running` (`:17`), `signal` (`:143`), `set_dark_mode` / `set_wallpaper` (`:169`, `:178`, via `osascript` and System Events), `has_developer_tools` (`:133`), `copy_to_clipboard` (`:198`, `pbcopy`), `reveal` (`:215`, Finder), `displays::on_added` (`src/system/displays.rs`, CoreGraphics reconfiguration callback, the app re-applies the wallpaper when a display is plugged in), `utc_offset_minutes` / `time_zone_name` (`:102`, `:124`, for the schedule) |
+| `system.rs` + `system/` | The only module that runs programs or touches the OS. `system.rs` holds what both systems share (`Outcome`, `run` / `run_in` / `run_env` adding Homebrew folders to `PATH`, `find_program`, `is_running`, `signal`, `parse_version`, `time_zone_name`); the rest has one file per system with the same function names, only one compiled (`#[cfg(target_os)]`) | `system/macos.rs`: `set_dark_mode` / `set_wallpaper` (`osascript`, System Events), `dark_mode`, `defaults_read`, `apple_script`, `app_executable` (`plutil`), `has_developer_tools`, `copy_to_clipboard` (`pbcopy`), `reveal` (Finder), `open_app` (`palette://` link), `utc_offset_minutes` (`date -r`). `system/linux.rs`: the same per desktop session (GNOME `gsettings`, KDE `plasma-apply-wallpaperimage`, Noctalia `noctalia msg`; `wl-copy`/`xclip`, `xdg-open`, `date -d`; `open_app` starts `palette-app` next to the CLI or on `PATH`, own process group; `run_desktop` borrows the newest live Wayland display's environment). `system/session.rs`: `Platform` (built-for system, or `PALETTE_PLATFORM` in a fake home) and `Session` (macOS / GNOME / KDE / niri ± Noctalia / other, from `XDG_CURRENT_DESKTOP`, `NIRI_SOCKET`, a running `noctalia`, or `loginctl` over SSH; `PALETTE_SESSION` in a fake home). `displays.rs` (CoreGraphics callback, the app re-applies the wallpaper when a display is plugged in) / `displays_linux.rs` (no-op); `fonts.rs` (CoreText) / `fonts_linux.rs` (`fc-list`) |
 | `settings.rs` | `settings.toml`: hotkey, Dock, welcome flag, per-app off list, default wallpapers, Obsidian look, `[schedule]`, favourites, `next_cycles` | `Settings` (`src/settings.rs:18`), `load` / `save` (`:69`, `:143`), `is_on` (`:60`), `normalise_hotkey` (`:203`) |
 | `doctor.rs` | Read-only health check (`palette doctor`, Settings → Setup → Check). Target notes can be `Note::info` (`src/targets/mod.rs:87`): shown, but not counted as a problem | `run` (`src/doctor.rs:47`), `Row`, `Status`, `theme_row`, `target_row`, `command_row` (warns about several `palette` binaries) |
 | `thumbs.rs` | 480 px JPEG previews made with macOS `sips`, cached by path + size + modification time | `thumbnail` (`src/thumbs.rs:30`), `image` (`:40`) |
@@ -61,12 +56,19 @@ Both only call the library.
 | `lock.rs` | One change at a time: an exclusive `flock(2)` on `~/.config/palette/.lock` around switch, undo, refresh, init, apps on/off, import and wallpaper changes. Waits up to 10 s, then a clear error. The kernel drops the lock when the process exits, so a stale file never blocks. Re-entrant within a thread (import → switch → init) | `Guard` (`src/lock.rs:35`), `exclusive` (`:50`), `exclusive_for` (`:54`), `TIMEOUT` (`:26`) |
 | `schedule.rs` + `schedule/cities.rs` | Day and night themes: a day theme from sunrise, a night theme from sunset (NOAA solar equations; place from a built-in city list or typed latitude/longitude, no network, no Location permission) or from two fixed times. Each boundary is acted on once, so a theme you chose by hand stays until the next boundary | `Schedule` (`src/schedule.rs:60`), `Mode` (`:42`), `sun_day` (`:362`), `evaluate` (`:437`), `which_now` (`:550`), `apply_now` (`:627`), `enable` / `disable` / `save` (`:715`, `:762`, `:690`), `search_cities` / `suggest_city` (`:204`, `:261`), `CITIES` (`cities.rs:22`). Test hooks: `PALETTE_NOW`, `PALETTE_UTC_OFFSET` |
 | `favourites.rs` | Up to ten favourite themes (in `settings.toml`) and the last eight switched to (`recent` file); which list `next` / `prev` step through | `Cycle` (`src/favourites.rs:24`), `list` / `add` / `remove` / `set` (`:48`–`:84`), `cycle_names` (`:105`), `recents` / `record` (`:128`, `:142`), `MAX_FAVOURITES`, `MAX_RECENTS` |
-| `check.rs` | `palette check [theme]`: contrast report. Every colour pair a theme is used for is measured; pairs below the minimum are listed with what Palette does about them and a suggested colour. Separate from `doctor`, which checks wiring | `BODY` 4.5, `SECONDARY` 2.5, `COMMENTS` 1.6 (`src/check.rs:21`–`:25`), `Issue` (`:139`), `Report` (`:175`), `colors` (`:197`), `run` (`:232`) |
+| `sheet.rs` | The inspection sheet: `palette catalog --sheet <file>` / Get themes → Inspection sheet (`open`: `cache/themes.html`, opened in the browser). One offline page, every catalogue theme drawn as made and with the fixes at your level (`normalise::apply_all`), its search words, per-app verdicts and changes; filters and chips. The drawing is `app/ui/look.js` embedded with `include_str!` (one source with the app); data is written as a JS literal by a small escaper (no JSON crate) | `html`, `write`, `open` |
+| `search.rs` | Search by look: `tags` gives a theme its words from its colours (dark/light; mood with aliases: colourful/vivid, muted/calm, monochrome/mono; warm/cool from background and text (double) and accent hues in OKLCH; high-/low-contrast; the accent's and background tint's colour names); `matches`: every word starts a tag or is part of the name. Used by `palette list <words>`, `palette catalog <words>`, the app's search boxes (`findTheme` + `chipRow` in `shared.js`, tags sent with each theme) | `tags`, `matches` |
+| `normalise.rs` | Readability fixes, applied in `theme::load` after your edits, so theme files stay untouched: shades in order (swapped if reversed; left alone on pure black/white), body text, panels and selection *visible* against the background with text readable on them, then secondary text, comments and coloured text. Lightness only (OKLCH), hue and chroma kept; a key in `edits.toml` is never touched; within 3 % of a minimum is left alone (`SLACK`); a second run changes nothing. Levels off / minimal (default) / strong (`settings.readability`); `settings.original_colours` skips a theme. `theme::load_fixed` returns the changes, `theme::load_edited` the colours before them (the colour editor uses that) | `Level`, `Change`, `apply` / `apply_with` (ranking first, then the fixes with reuse, repeated until nothing moves), `fix` (the fixes alone), `SLACK`, `SHADE_STEP` (light themes' shades a small step); `editor_selection` and `list_selection` (F3: lazygit, fzf), one rule over `SYNTAX` / `LIST`; tests include every catalogue theme at both levels (readable, in order, stable) |
+| `glass.rs` | Glass lift: for apps whose glass Palette sets (`GLASS_APPS`, Zed), text is lifted (same hue, `to_hex_fit` keeps the hue near white) to read on the window's mix of theme background and wallpaper, in that app's file only (`render::render_with` gives it its own context). The wallpaper's colours (average, brightest/darkest tenth) are read once from its thumbnail and cached in `cache/wallpaper-colours.toml`; `effects::set_wallpaper` re-renders the glass apps after a wallpaper change (`glass_follows_wallpaper`). A colour that can't reach its minimum is left alone and reported. The lift per theme (F2, `settings.glass_lift`, `Lift`): Auto (minimums over the average), 0 = off, 1-100 = minimums × up to 2 over the average mixed towards the brightest tenth (darkest, light themes); `preview` feeds the slider in My themes | `lift`, `lifts`, `behind`, `opacity`, `Lift`, `set_lift`, `preview` |
+| `monochrome.rs` | Monochrome themes: spaced greys (on by default) and a faint tint of the theme's hue with red/green nudged (off), run by `normalise::apply_all` after the fixes; never an edited key | `apply`, `Mono`, `is_monochrome` |
+| `ranking.rs` | Ranked roles and the theme's own colours (from the colour lab): `rank` re-chooses roles that break the rules from the theme's own colours (guessed themes: every rule; named themes: only the ordering rules); `reuse` swaps a colour the fixes would invent for one of the theme's own within ΔE 0.05. `roles_of` tells guessed from named (catalogue `derived`, or `GUESSED_MARK` written by the importer); a key in `edits.toml` is never touched | `rank`, `reuse`, `Roles`, `roles_of`, `order_problems`, `REUSE_DE` |
+| `check.rs` | `palette check [theme]`: contrast report. Every colour pair a theme is used for is measured; pairs below the minimum are listed with what Palette does about them and a suggested colour. the report is on the colours as used (after fixes), lists the fixes (`Report::fixed`), and uses the same 3 % slack. Separate from `doctor`, which checks wiring | `BODY` 4.5, `SECONDARY` 2.5, `COMMENTS` 1.6 (`src/check.rs:21`–`:25`), `Issue` (`:139`), `Report` (`:175`), `colors` (`:197`), `run` (`:232`); `Report::glass` (lift lines per see-through app); `apps` / `app_verdicts`: per kind of app (terminals, editors, lists, Palette's windows) ok / weak / bad from what each draws (`palette check --app`, Settings → Colours) |
 | `tools.rs` + `tools/starters/` | `palette tools`: the programs Palette themes but does not ship (SketchyBar, JankyBorders, AeroSpace, gowall), with the Homebrew commands to get them, and optional starter configs compiled into the binary (`sketchybar/`, `borders/`, `aerospace/`). Palette never runs Homebrew | `status` (`src/tools.rs:197`), `add_starter` (`:343`, refuses if the tool has any config), `remove_starter` (`:411`, to the Trash, only while the files are exactly what Palette wrote), `start_command` (`:248`), `open_terminal` (`:451`) |
 | `library.rs` | The wallpaper library `~/.config/palette/wallpapers/`: pictures that belong to no theme. Use one now, copy it into a theme (optionally recoloured), or make a theme from it. Names are paths inside the folder; `list` walks regular files only and never follows symlinks | `dir` (`src/library.rs:25`), `list` (`:50`), `find` (`:125`), `add` (`:138`), `remove` (`:172`), `use_now` (`:187`), `add_to_theme` (`:195`), `new_theme` (`:216`), `sanitise` (`:239`) |
+| `launcher.rs` | Linux: the app's launcher entry `~/.local/share/applications/palette.desktop` ("Quick switch" and "Settings" actions, icon in Palette's folder), written by the app at every start unless the app lives under `/usr` (a package brings its own); removed by `init --remove` | `install`, `remove`, `desktop_file`, `quote` (Exec quoting per the desktop entry spec) |
 | `fetch.rs` | Wallpapers from a link: one picture, or a GitHub repo or folder, listed through the git trees API and downloaded file by file into the library. The only network code besides `install.rs`. Caps: 40 MB a file, 200 files and 2 GB a download | `Link` (`src/fetch.rs:41`), `list` (`:270`), `select` (`:397`), `check_caps` (`:453`), `download` (`:488`), `image_kind` (`:635`, checks magic bytes) |
 | `edits.rs` | Your colour edits: `themes/<name>/edits.toml`, laid over a theme's own colours by `theme::load` (`theme::load_original` skips them). Set, reset one or all, or apply every `check` suggestion | `apply` (`Edit::Set` / `Reset` / `FixContrast`), `sheet`, `read`; `lib::edit_colours` re-renders the active theme |
-| `desktop/` | Settings → Bar / Windows / Borders (`palette desktop`). Per tool: Palette writes the config only once you let it manage it (`manage` keeps your file as `desktop/backups/<tool>/original`; `release` restores it); every change backs up first (`KEEP` 5, `restore` goes back) and writes atomically. Settings in `desktop/<tool>.toml`. Reloads are skipped in fake homes | `mod.rs`: `Tool`, `status`, `get`, `set`, `set_keys`, `manage`, `release`, `backups`, `restore`. `macos.rs`: Dock and menu bar (`read`, `set`). `prompt.rs`: Starship (`Prompt`, `Block`, `MODULES`, `OPTIONS`, `from_text` reads a format into blocks, `render` key by key, `preset`, `preview` + `ansi_spans`). `bar/`: `Bar`, `Pill` (side `left` / `center` / `right`, `SIDES`), `Place` + `Bar::move_pill` / `find_pill` / `screen_order` (whole-pill moves for `palette desktop bar move` and the page's drag and Pill ◀ ▶, via the app's `bar_move_pill`), `Item`, `KINDS` (the pill library), `SLOTS` (workspace slots spaces.sh fills), `render` (sketchybarrc + scripts in `~/.config/palette/bar/`), `import` (reads your sketchybarrc), and the scripts (`spaces.sh`, `stats.sh`, `widgets.sh`, `habits.sh`, `front_app.sh`). `windows.rs`: `Windows`, `Shortcut`, `COMMANDS`, key-by-key `render` with `toml_edit` (shortcuts too), `import`, `prepare`, `running_apps`. Bar fonts: `bar::font_warnings` asks `system/fonts.rs` (CoreText: `families`, `styles`). `borders.rs`: `Borders`, `render`, `import` |
+| `desktop/` | Settings → Bar / Windows / Borders (`palette desktop`). Per tool: Palette writes the config only once you let it manage it (`manage` keeps your file as `desktop/backups/<tool>/original`; `release` restores it); every change backs up first (`KEEP` 5, `restore` goes back) and writes atomically. Settings in `desktop/<tool>.toml`. Reloads are skipped in fake homes | `mod.rs`: `Tool`, `status`, `get`, `set`, `set_keys`, `manage`, `release`, `backups`, `restore`. `macos.rs`: Dock and menu bar (`read`, `set`). `prompt.rs`: Starship (`Prompt`, `Block`, `MODULES`, `OPTIONS`, `from_text` reads a format into blocks, `render` key by key, `preset`, `preview` + `ansi_spans`). `bar/`: `Bar`, `Pill` (side `left` / `center` / `right`, `SIDES`), `Place` + `Bar::move_pill` / `find_pill` / `screen_order` (whole-pill moves for `palette desktop bar move` and the page's Pill ◀ ▶, via the app's `bar_move_pill`), `Item`, `KINDS` (the pill library), `SLOTS` (workspace slots spaces.sh fills), `render` (sketchybarrc + scripts in `~/.config/palette/bar/`), `import` (reads your sketchybarrc), and the scripts (`spaces.sh`, `stats.sh`, `widgets.sh`, `habits.sh`, `front_app.sh`). `windows.rs`: `Windows`, `Shortcut`, `COMMANDS`, key-by-key `render` with `toml_edit` (shortcuts too), `import`, `prepare`, `running_apps`. Bar fonts: `bar::font_warnings` asks `system/fonts.rs` (CoreText: `families`, `styles`). `borders.rs`: `Borders`, `render`, `import` |
 | `targets/mod.rs` | The `Target` type and the list of all 19 targets | `Target` (`src/targets/mod.rs:35`), `Output` (`:55`), `Note` (`:70`, `ok` / `info` / `fix`), `BASE` (`:104`), `ALL` (`:115`), `has_program` / `has_app` (`:142`, `:147`) |
 | `targets/<name>/` | One app each: a template, its wiring, reload and doctor | see section 6 |
 | `main.rs` | The CLI: clap subcommands and printing only | `Command` enum (`new --from-wallpaper`), `run`, `report` / `print_effects`, `init`, `bg` (`recolor --strength`, `generate --seed`, `get`, `library`), `catalog`, `schedule`, `tools`, `check`, `fav`, `recent` (1562 lines) |
@@ -75,12 +77,16 @@ Both only call the library.
 
 | File | Job |
 | --- | --- |
-| `app/src/main.rs` (2211 lines) | Tauri shell: 64 commands, the tray, the global hotkey, deep links, single-instance guard (`tauri_plugin_single_instance`), autostart, Dock policy, window placement, the schedule ticker (checks at launch, then every minute), the switch toast (`announce`) |
+| `app/src/main.rs` (~450 lines) | Tauri shell: shared state, `AppError` (message + `Problem` code for the page), plugins, the setup (`main`): single-instance guard, autostart, deep links, the schedule ticker |
+| `app/src/<area>.rs` | One module per window or Settings tab, each `use super::*;` with `pub(crate)` items: `themes` (switching, `announce`), `tray` (native menu, rebuilt on hover), `windows` (show/place, `window()` on demand, idle closing, hotkey, `palette://` links), `prefs` (Apps, General, Performance, glass, system), `catalog`, `wallpapers`, `library`, `setup`, `tools`, `sync`, `cli`, `colours`, `desktop`, `schedule` |
 | `app/ui/picker.html`, `overlay.html`, `settings.html`, `toast.html` | The four windows. Plain HTML, no build step |
-| `app/ui/app.js` (1612 lines) | The picker, quick switcher and Settings logic, picked by `document.body.dataset.view` |
+| `app/ui/shared.js` | Loaded first by every window: `invoke` (failures become a `Problem` with `code`), theme list, toasts, helpers, hotkey recorder, `start(view)`, `chipRow` |
+| `app/ui/look.js` | Loaded before shared.js, no dependencies: `tinyDesktop` (a theme drawn as an SVG desktop from its colours: picker, quick switcher, My themes, Get themes, the sheet) and `findTheme` (the search rule). Embedded in the inspection sheet by `src/sheet.rs` |
+| `app/ui/picker.js`, `overlay.js` | The picker and the quick switcher, each with its own wiring |
+| `app/ui/settings.js` + `settings-*.js`, `welcome.js`, `schedule.js`, `desktop.js` | Settings: `settings.js` has the object (Apps, General, Move, CLI) and the page's wiring; each `settings-<tab>.js` adds its methods with `Object.assign(settings, …)` (colours, tools, themes, mine (My themes: ★ favourites, switch), wallpapers, setup). `settings-keys.js` loads last: the keyboard layer (numbers/letters for tabs, arrows, ⌘[ ⌘], / search, ? sheet, the bottom strip's keys); it wraps `settings.show` so a new tab starts with no row chosen |
 | `app/ui/toast.js` (53 lines) | The "Switched to X · Undo" toast: painted in the new theme's colours, hides itself after 5 s (paused on hover) |
 | `app/ui/style.css` | Shared styles, recoloured live in the active theme (`paintChrome`) |
-| `app/tauri.conf.json` | Windows, CSP, bundle (app + dmg), ad-hoc signing (`signingIdentity "-"`), `externalBin` |
+| `app/tauri.conf.json` | The quick switcher window (the others are built in code), CSP, bundle (app + dmg), ad-hoc signing (`signingIdentity "-"`), `externalBin` |
 | `app/Info.plist` | Deliberately has no `LSUIElement` (see section 9) |
 | `app/sidecar.sh` | Builds the CLI and copies it to `app/binaries/palette-<triple>`, so the `.app` ships the CLI |
 | `app/build.sh` | `cargo tauri build`, then tells macOS to forget the build-folder `Palette.app`, so `palette://` links only go to /Applications |
@@ -88,9 +94,7 @@ Both only call the library.
 ### Other
 
 `themes/` (23 bundled `colors.toml`), `tests/` (section 11), `examples/starship.toml`, `scripts/release.sh`, `packaging/homebrew/`, `.github/workflows/ci.yml`,
-`docs/` (THEME_SPEC, THEME_AUTHORING, ADDING_A_TARGET, WALLPAPERS, this file). The
-owner's working docs (ROADMAP, DECISIONS, IDEAS, the hands-on checklist `user_test.md`,
-setup notes `CONFIG_INVENTORY.md`, PUBLISHING) stay local and are not in the repo.
+`docs/` (THEME_SPEC, THEME_AUTHORING, ADDING_A_TARGET, WALLPAPERS, this file).
 
 ---
 
@@ -105,8 +109,8 @@ Everything Palette owns lives under `~/.config/palette/` (`Paths::root`).
     1791846443990-osaka-jade/                         one folder per switch, newest 5 kept
       theme                                           name of the theme it was rendered from
       sketchybar.sh  borders.sh  ghostty.conf  kitty.conf  alacritty.toml  tmux.conf
-      vscodium.json  neovim.lua  obsidian.css  btop.theme  shell.sh  starship.toml
-      fzf.opts  lazygit.yml  sketchybar-item.sh  wezterm.lua  habit-tracker.json  chess-review.json
+      vscodium.json  zed.json  neovim.lua  obsidian.css  btop.theme  shell.sh  starship.toml
+      fzf.opts  lazygit.yml  sketchybar-item.sh  wezterm.lua  habit-tracker.json  chess-review.json  dispatch.json  easyplots.json
   themes/<name>/                                      your themes, installed themes, or just wallpapers for a bundled one
     colors.toml  light.mode  preview.png  backgrounds/  <target>.<ext> overrides
     .palette-source                                   only for `palette install`ed themes: url, date, files that came with it
@@ -177,7 +181,8 @@ Everything Palette owns lives under `~/.config/palette/` (`Paths::root`).
 5. **Effects.** `effects::apply` (`src/effects.rs:22`). In a fake home it only records the
    wallpaper choice. Otherwise:
    - **Reloads:** for each target in `targets::ALL`, if it's switched on in
-     `settings.toml`, run its `reload` (see section 6). The `Reloads` list (`:75`)
+     `settings.toml` **and its file changed** (`effects::apply_only` with the diff from step 3;
+     `needs_reload`), run its `reload` (see section 6); the rest report "unchanged". The `Reloads` list (`:75`)
      remembers which reload functions already ran, compared with `std::ptr::fn_addr_eq`.
      SketchyBar and its theme pill share one reload, so the bar redraws once.
    - **Appearance:** unless switched off, `system::set_dark_mode` runs through osascript
@@ -193,9 +198,18 @@ Everything Palette owns lives under `~/.config/palette/` (`Paths::root`).
    so every window re-renders, and `announce` shows the "Switched to X · Undo" toast
    (unless the picker is open or Settings has focus).
 
-`undo` (`src/lib.rs:95`) calls `state::step_back`, which repoints `current` at the
-previous generation and runs the effects again. It doesn't re-render: the old files are
-still on disk.
+`undo` calls `state::step_back`, which repoints `current` at the previous generation, renders
+that theme again **with today's settings** into it (`state::replace_file`; the old files stay
+only if the theme is gone) and runs every effect.
+
+**Settings changes are not switches .** Glass, Zed, Obsidian, monochrome, the
+readability level, glass lift, bar scroll and colour edits call `lib::rerender(paths, only)`:
+render the active theme again (only the targets in `only`, `render::render_some`), write the
+changed files into the current generation in place, and reload only those apps. No new
+generation (so settings never use up one of the 5 Undo steps), no `recent` entry, no log line.
+`refresh` (`palette refresh`, Setup → Re-apply) is the same in place, but reloads every app.
+`performance` rewrites a managed bar without reloading it, then reloads it once: by the
+re-render if `sketchybar.sh` changed, otherwise itself (two reloads at once scramble the bar).
 
 ---
 
@@ -206,12 +220,13 @@ renders any file the active generation lacks, for example `obsidian.css` after a
 upgrade. Then `wiring::run` wires every switched-on target, and finally the apps whose
 configs changed are reloaded.
 
-**Three kinds of wiring** (`src/wiring.rs:27`):
+**Four kinds of wiring** (`src/wiring.rs:27`):
 
 | Kind | What it does | Used by |
 | --- | --- | --- |
 | `Import` | Adds a marker comment (`MARKER`) plus one import/source line, e.g. `[ -f "$HOME/.config/palette/current/sketchybar.sh" ] && source ...`. Where the line goes is the target's `insert` function: `at_end`, `after_colours` (SketchyBar: after your colour variables), or before `sketchybar --update` (the pill). | sketchybar, sketchybar-item, borders, ghostty, kitty, alacritty, tmux, neovim, shell |
-| `Setting` | Changes one setting to point at Palette (`value`) and remembers the old value in `wiring/`. With `per_file`, it remembers one value per file (Obsidian vaults). An optional `prepare` step runs first (VSCodium installs its theme extension; Obsidian writes the snippet). | vscodium, btop, obsidian |
+| `Setting` | Changes one setting to point at Palette (`value`) and remembers the old value in `wiring/`. With `per_file`, it remembers one value per file (Obsidian vaults). An optional `prepare` step runs first (VSCodium installs its theme extension; Zed copies its theme file; Obsidian writes the snippet). | vscodium, zed, btop, obsidian |
+| `Direct` | Nothing to wire: counts as wired whenever the app is installed; the target's `reload` applies Palette's file itself with a command (and copies it where the app looks). | gnome, kde, noctalia |
 | `Shell` | Nothing in the app's config. The tool reads an environment variable from `shell.sh`, which is wired into your shell rc. | starship, fzf, bat, lazygit |
 
 **Blocks are found by their import line** (`has_block`, `remove_block`), not by line
@@ -246,7 +261,8 @@ Each target is a `const TARGET: Target` built from `..BASE` defaults
 | --- | --- |
 | `name` | Used in CLI, settings and doctor |
 | `output: Option<Output>` | `file` (name in `current/`), `template` (minijinja), `overridable` (may a theme ship its own copy? never for files that can run programs), `finish` (post-process) |
-| `wiring` | Import / Setting / Shell (section 5) |
+| `wiring` | Import / Setting / Shell / Direct (section 5; Direct = nothing to wire, Palette applies it itself) |
+| `platforms` | `Both`, `Mac` or `Linux`: `targets::all()` leaves out the other system's targets |
 | `installed` | Is the app on this Mac? Only for reports |
 | `reload` | Make the running app pick up the change |
 | `unload` | After `init --remove`: back to your own look (defaults to reload) |
@@ -263,6 +279,7 @@ Each target is a `const TARGET: Target` built from `..BASE` defaults
 | alacritty | `alacritty.toml` | Import (`import = [...]`) | reloads by itself (watches the file) | yes | |
 | tmux | `tmux.conf` | Import (`source-file -q`) | `tmux source-file`; unload re-sources yours | no (tmux can `run-shell`) | |
 | vscodium | `vscodium.json` | Setting `workbench.colorTheme` in `settings.json`, after installing a local "Palette" theme extension | updates the extension's theme file | yes | extension missing |
+| zed (Mac) | `zed.json`: three themes, same colours, one per window kind (Palette opaque, Palette Glass blurred, Palette Clear transparent); glass strength sets the alpha | Setting: the whole top-level `theme` value in `settings.json` (JSON with comments) becomes the chosen kind's name, after copying the file to `~/.config/zed/themes/palette.json`. Changing glass kind re-points it (`zed::select`), because Zed re-applies a window's blur only when settings change | copies the file again (temp + rename); Zed watches its themes folder | yes | theme file missing |
 | neovim | `neovim.lua` | Import (`pcall(dofile, ...)`) in `init.lua`, created if missing | running Neovims watch the file | no (Lua) | init.vim-only setups |
 | obsidian | `obsidian.css` (colours, plus the active-pane ring and dimming from `[obsidian]` in settings.toml, via `obsidian_ring`/`obsidian_dim` in the template context; `lib::obsidian_look`) → copied as `palette.css` into every vault's `.obsidian/snippets/` | Setting: adds `palette` to `enabledCssSnippets` per vault (not while Obsidian is open) | copies the snippet atomically (temp + rename) | no (CSS can `@import` the web) | snippet present but switched off |
 | btop | `btop.theme` | Setting `color_theme = "palette"` plus a link in `~/.config/btop/themes/` | `SIGUSR2` (btop 1.4+) | yes | link missing |
@@ -271,14 +288,36 @@ Each target is a `const TARGET: Target` built from `..BASE` defaults
 | fzf | `fzf.opts` | Shell (`FZF_DEFAULT_OPTS_FILE`) | next run | no | |
 | bat | none | Shell (`BAT_THEME` follows the terminal's ANSI colours) | none | n/a | |
 | lazygit | `lazygit.yml` | Shell (`LG_CONFIG_FILE`) | next run | no | |
-| habit-tracker | `habit-tracker.json` (colours only; JSON, not CSS, because CSS can `@import` from the web) | none: the Habit Tracker app reads the file itself when its "Follow Palette" setting is on (off by default) | none: the app checks the file's date every couple of seconds | no | |
+| habit-tracker | `habit-tracker.json` (colours, plus a `glass` block from `palette glass habit-tracker`; JSON, not CSS, because CSS can `@import` from the web) | none: the Habit Tracker app reads the colours when its "Follow Palette" setting is on (off by default), and the glass always | none: the app checks the file's date every couple of seconds while following, and on window focus | no | |
+| dispatch (Mac), easyplots | `dispatch.json`, `easyplots.json` (same keys as habit-tracker.json, with its `glass` block from `palette glass dispatch|easyplots`) | none: each app reads its own file (Dispatch always; EasyPlots when `[launcher] theme = "palette"`, the default). Own files so no app depends on another app's target | none: the apps check the file's date | no | |
 | chess-review | `chess-review.json` (colours only; JSON, not CSS, because CSS can `@import` from the web) | none: the Chess Review app reads the file itself when its "Follow Palette's theme" setting is on | none: the app checks the file's date every couple of seconds | no | |
-| wezterm | `wezterm.lua` (a Lua table returned as `colors`) | Import, one `pcall(dofile, …)` line before your `return config`; it also adds Palette's folder to WezTerm's reload watch list | none needed: WezTerm reloads when the `current` link changes | no (Lua runs inside WezTerm) | |
+| wezterm | `wezterm.lua` (two values: the `colors` table, then window settings from `palette glass wezterm`) | Import, one `pcall(dofile, …)` line before your `return config` (an older colours-only line is replaced in place by `init`); it also adds Palette's folder to WezTerm's reload watch list | none needed: WezTerm reloads when the `current` link changes | no (Lua runs inside WezTerm) | |
 
-There are 19 targets in `ALL` (`src/targets/mod.rs:115`). Adding an app = a new folder
+| gnome (Linux) | `gnome.ini` (accent, mode) | Direct | `gsettings ... accent-color` = nearest of GNOME's 9 presets by hue (slate for greys) | no | |
+| kde (Linux) | `kde.colors` (a whole KDE colour scheme, `r,g,b`) | Direct: copied to `~/.local/share/color-schemes/PaletteA.colors` or `PaletteB.colors` | `plasma-apply-colorscheme` with the name not active (KDE ignores re-applying the active one); unload restores the scheme you had | no | |
+| noctalia (Linux) | `noctalia.json` (Noctalia v5 palette, same in `dark` and `light`) | Direct: copied to `~/.config/noctalia/palettes/Palette.json` | `noctalia msg color-scheme-set custom Palette`; unload: builtin Noctalia | no | |
+| foot (Linux) | `foot.ini` (hex without `#`; `[colors-dark]` on foot 1.26+, by `finish`) | Import (`include=`) at the top, in `[main]` | none: new windows read it | yes | |
+| niri (Linux) | `niri.kdl` (focus ring, border, insert hint colours) | Import (`include "…"`, `//` marker) at the end of `config.kdl` | niri reloads by itself | no (niri configs can spawn programs) | niri older than 25.11 (no `include`) |
+| konsole (Linux) | `konsole.colorscheme` (`r,g,b`) | Direct: copied to `~/.local/share/konsole/Palette.colorscheme`; `Palette.profile` made once from your default profile (only its `ColorScheme` is Palette's) and set as `konsolerc`'s `DefaultProfile` (one key); unload restores your default | none: new windows and tabs | yes | |
+| gnome-terminal (Linux) | `gnome-terminal.dconf` (`key=value` lines) | Direct: a "Palette" profile (fixed UUID) made once from your default profile, added to the list and made default; each switch `dconf write`s only its colour keys; unload restores your default and removes it | live (GNOME Terminal follows dconf) | no | |
+| fuzzel (Linux) | `fuzzel.ini` (`RRGGBBAA`) | Import (`include=`) at the top, before any section | none: read each time it opens | yes | your own `[colors]` keys (they win) |
+
+Mac-only: sketchybar, sketchybar-item, borders, habit-tracker, chess-review, dispatch, zed. On Linux,
+wallpaper and light/dark come from `system/linux.rs` for the session you're in. The app
+list (`[apps]`) is one for the whole machine, every desktop alike.
+
+There are 27 targets in `ALL` (`src/targets/mod.rs`), 19 on the Mac and 22 on Linux. Adding an app = a new folder
 under `src/targets/` and one line in `ALL`. No other target changes.
 
 ---
+
+**Terminal glass** (`lib::glass`, `palette glass`, `settings.toml [glass.<app>]`): Ghostty, kitty,
+Alacritty and WezTerm each have a kind (`own` = write nothing, the default; solid, blurred, clear;
+Ghostty also liquid-glass/clear), a strength and a blur. `render::glass_vars` turns them into
+`glass.<app>` for the templates, which append the app's own keys; a change re-renders, so the
+usual reload applies it. Dispatch and EasyPlots get the same three numbers as a `glass`
+block in their JSON colours files and apply them themselves (Dispatch caps see-through at
+60 %; EasyPlots doesn't, its Settings only warns).
 
 ## 7. Colour engine (`src/colour.rs`)
 
@@ -337,7 +376,7 @@ accent. Templates that pick colours by name therefore gave six identical heading
 
 ---
 
-## 8. Community themes (Phase 5c)
+## 8. Community themes
 
 - **Catalogue:** `src/catalog.toml` holds 112 themes from the Omarchy manual's
   "Extra themes" page, 74 KB, baked into the binary.
@@ -381,7 +420,28 @@ accent. Templates that pick colours by name therefore gave six identical heading
 
 ## 9. The app (`app/`)
 
-**Windows** (`app/tauri.conf.json`):
+**Windows**: none is in `app/tauri.conf.json`; all four are built in code by `window()` in
+`app/src/windows.rs`, the first time they're needed. With `windows = "ready"` (the default)
+all four are built at launch, as before; `"on-demand"` builds only the quick switcher at
+launch, `"all-on-demand"` none. Every hide goes through `put_away`: with windows on demand
+it destroys the window 3 s later if it's still hidden (not at once: the quick switcher hides
+*before* it asks for the switch); the toast is left to the idle check. `close_idle_windows`
+destroys any on-demand window still
+hidden after two 30 s checks (the quick switcher too with `all-on-demand`), and with
+`close_idle_settings` also an open Settings window unfocused for 10 minutes (AeroSpace parks
+other workspaces' windows in a corner, still "visible"). The pages share one WebKit `WebContent`
+process (measured 2026-11-08: Settings and the quick switcher in one, ~140 MB), which exits when
+the last window closes; only closing a window frees its page. Settings also empties a heavy tab
+(My themes, Get themes, Wallpapers: `DRAWN` in `settings.js`) when you leave it. On focus
+(every AeroSpace hop) Settings asks the core for `state::stamp`, a fingerprint of Palette's
+files (active generation, settings, recents, wallpaper state, the theme's edits and
+backgrounds, the library, desktop pages), and redraws only the visible tab, only when the
+stamp changed (`settings.onFocus`); the other windows still redraw on every focus (`start` in
+`shared.js`), as each one opens fresh. A window made
+just now misses events sent while its page loads, so the toast asks `last_switch` and
+Settings asks `pending_tab` when they start. `menu_click` (menu / picker / quick-switcher)
+decides the tray's left click (`set_show_menu_on_left_click` for the native menu) and
+`palette://click`, which the bar's theme pill opens.
 
 | Window | Size | Behaviour |
 | --- | --- | --- |
@@ -406,8 +466,8 @@ accent. Templates that pick colours by name therefore gave six identical heading
 | Bar, Windows, Borders (`ui/desktop.js`) | `desktop_status`, `desktop_get`, `desktop_set`, `desktop_own` (manage / give back), `desktop_restore`, `bar_kinds`, `running_apps`, `font_families`, `font_styles`, `aerospace_commands`, `macos_get`, `macos_set` (Dock & menu bar tab), `prompt_meta`, `prompt_preview`, `prompt_presets`, `prompt_preset` (Prompt tab) |
 | Setup tab | `setup_all` (init / init --remove), `check` (doctor) |
 | Move tab | `sync_prefs`, `export_dialog`, `import_dialog` (dry-run plan), `import_apply` |
-| General tab | `get_hotkey`, `set_hotkey`, `prefs`, `set_dock`, `set_login`, `set_welcomed`, `set_obsidian_look`, `cli_status`, `install_cli` |
-| Windows | `hide`, `open_settings`, `open_settings_tab` |
+| General tab | `get_hotkey`, `set_hotkey`, `prefs`, `set_app_prefs` (windows, menu bar click), `set_dock`, `set_login`, `set_welcomed`, `set_obsidian_look`, `cli_status`, `install_cli` |
+| Windows | `hide`, `open_settings`, `open_settings_tab`, `last_switch`, `pending_tab` |
 
 Slow commands (switching, installing, downloading, painting, thumbnails) are `async` and use `spawn_blocking`,
 so the UI thread never waits on `osascript` or `curl`.
@@ -435,8 +495,8 @@ and file name, never by path.
   Accessory (menu bar only) or Regular. `Info.plist` has no `LSUIElement`: a UI-element
   app that turns Regular later gets a second Dock tile.
 - **First launch:** opens Settings on the welcome tour until `welcomed = true`.
-- **Bundled CLI:** `externalBin` ships `Contents/MacOS/palette-cli` (not `palette`, see
-  DECISIONS 2026-10-17); Settings → Command-line tool links `~/.local/bin/palette` to it,
+- **Bundled CLI:** `externalBin` ships `Contents/MacOS/palette-cli` (not `palette`, so an
+  app build never overwrites the CLI in `target/`); Settings → Command-line tool links `~/.local/bin/palette` to it,
   and the Homebrew cask links it as `palette`.
 - **Signing:** ad-hoc (`signingIdentity "-"`) signs the whole bundle, so
   `codesign --verify --deep --strict` passes. Gatekeeper still asks on first open
@@ -482,13 +542,19 @@ and file name, never by path.
   - `run`, `ok` and `fails` run the real compiled binary (`CARGO_BIN_EXE_palette`)
     against it;
   - `write`, `read`, `path`, `palette_dir` and `current_file` set up and inspect files.
-- **Test files:** 209 passing tests (2 ignored), counted across the workspace with
+- **Linux on a Mac:** with a fake home, `PALETTE_PLATFORM=linux` gives the Linux target
+  list and `PALETTE_SESSION=gnome|kde|niri|niri-noctalia` the desktop (`tests/linux.rs`).
+  `cargo check`/`clippy --target aarch64-unknown-linux-gnu` type-check the Linux code.
+- **Test files:** 281 passing tests (2 ignored), counted across the workspace with
   `cargo test --workspace`.
 
 | File | Covers |
 | --- | --- |
 | `tests/cli.rs` | list / set / next, dry run, errors, generations |
+| `tests/linux.rs` | Linux target list, KDE/Noctalia/niri/GNOME/foot files for every bundled theme, one app list across desktops, doctor's system row, niri and foot includes |
 | `tests/phase2.rs` | `init` on a realistic SketchyBar + borders + Ghostty setup, byte-exact `--remove`, undo, wallpapers, safety rules |
+| `tests/app_colours.rs` | Dispatch and EasyPlots colour files (valid, own files, not overridable) |
+| `tests/zed.rs` | Zed: init, glass off/blurred/clear re-points `theme`, strength only changes alpha, remove gives settings.json back byte for byte, a user's own palette.json is kept |
 | `tests/phase3.rs` | tmux, VSCodium, Neovim, btop, shell tools, doctor, refresh, backup pruning, starship merge |
 | `tests/phase4.rs` | SketchyBar item, prev, hotkey, thumbnails |
 | `tests/phase5.rs` | per-app on/off, shared files, shell.sh rewrite without undo step |
@@ -505,7 +571,7 @@ and file name, never by path.
 - **UI checks:** no automated UI tests in the repo. Screens are checked by copying
   `app/ui` into a scratch folder with a mock `window.__TAURI__` (canned command
   results), then screenshotting with headless Chrome. Real-app behaviour is checked by
-  hand on a real Mac (the owner keeps that checklist locally).
+  hand on a real Mac.
 
 ---
 
@@ -534,7 +600,11 @@ and file name, never by path.
   the original byte for byte. AeroSpace is edited key by key (`toml_edit`), so everything
   the page doesn't show stays as you wrote it. The bar runs only Palette's own pill scripts
   (compiled in) or a script path you entered; the weather pill, if you add it, calls
-  wttr.in.
+  Open-Meteo (place looked up once, cached in `~/.config/palette/cache/weather-place`).
+- **Performance mode** (`palette performance`, `Settings::performance`): applied while
+  rendering (`Settings::glass`, `zed_glass_now`, the bar's and borders' `render`), never
+  saved into the looks themselves; turning it on or off re-renders the theme and rewrites a
+  managed bar/borders without a backup (`desktop::rewrite`).
 - **Trash, not delete.** Removing a theme you made yourself, or a starter config, moves
   it to `~/.Trash` (`install::move_to_trash`). Installed themes can be fetched again, so
   they are deleted.
@@ -601,12 +671,12 @@ Ordered by how much they matter. Effort: S = an hour or two, M = a day, L = seve
    `effects::wallpaper_effect` checks first. Lesson: a function with side effects must not
    sit inside a tuple that is matched afterwards, because Rust evaluates both halves.
    (The same day: two menu bar icons, fixed by the single-instance plugin.)
-3. **`app/src/main.rs` is 2211 lines, `app/ui/app.js` 1612 lines (M).** Growing with
+3. **(Fixed 2026-11-05.) `app/src/main.rs` was 2211 lines, `app/ui/app.js` 1612 lines (M).** Growing with
    every tab (64 commands now). *Suggestion:* split the Rust side into modules per area
    (`themes.rs`, `wallpapers.rs`, `schedule.rs`, `tools.rs`, `setup.rs`, `sync.rs`,
    `tray.rs`), and the JS into `picker.js`, `overlay.js`, `settings/*.js` (plain ES
    modules, still no build step).
-4. **Errors are strings (M).** The core uses `anyhow`; the app turns errors into
+4. **(Fixed 2026-11-05: `src/problem.rs`, `AppError`, JS `Problem`.) Errors are strings (M).** The core uses `anyhow`; the app turns errors into
    `String`. The UI can't tell "not installed" from "permission denied" except by text.
    *Suggestion:* a small error enum for cases the UI acts on (`NotInstalled`,
    `ThemeActive`, `NameTaken`, `NeedsPermission`), serialised with a code; keep anyhow
@@ -614,7 +684,7 @@ Ordered by how much they matter. Effort: S = an hour or two, M = a day, L = seve
 5. **No CI (fixed).** `.github/workflows/ci.yml` runs on a macOS runner: `cargo fmt
    --check`, `clippy --workspace -D warnings`, `cargo test --workspace`. *Still open:*
    rendering every catalogue theme in CI.
-6. **No logging (S).** When something odd happens in the app there's no trace.
+6. **(Fixed 2026-11-05: `src/log.rs`, `palette log`.) No logging (S).** When something odd happens in the app there's no trace.
    *Suggestion:* append one line per switch / effect to `~/.config/palette/palette.log`
    (rotated at ~200 KB), behind a setting. Keep it local, no telemetry.
 7. **Catalogue goes stale (S).** `catalog.toml` was built by a one-off script in a
@@ -637,10 +707,11 @@ Ordered by how much they matter. Effort: S = an hour or two, M = a day, L = seve
     tuned on 23 bundled themes. *Suggestion:* a test that analyses all 112 catalogue
     themes and snapshots mood counts, so a change shows its effect; your friends' theme
     inspection can feed corrections.
-12. **macOS-only seams (L, for the Linux port).** `system.rs` is already the only place
-    that touches the OS, which is the right seam. The wallpaper, appearance,
-    `is_running`, `sips` and `has_app` calls need Linux versions. *Suggestion:* a
-    `Platform` trait with a macOS implementation now, before more macOS calls spread.
+12. **macOS-only seams (Linux port).** Done for the core's system calls:
+    `system/macos.rs` and `system/linux.rs` (compile-time choice, not a trait), and
+    targets have `platforms`. Still macOS-only: images (`sips` in `pixels.rs`),
+    the Mac desktop pages (`src/desktop/`, still compiled on Linux; could be cfg-gated to
+    shrink the Linux binary), and the app shell.
 13. **settings.toml loses hand-written comments (S).** `save` rewrites the whole file.
     *Suggestion:* `toml_edit` (keeps formatting) if hand-editing matters, or document
     that comments are not kept.
@@ -653,7 +724,7 @@ Ordered by how much they matter. Effort: S = an hour or two, M = a day, L = seve
     *Suggestion:* only worth it after release. If so, collect UI strings into one
     `strings.js` first.
 16. **Generated preview images for bundled themes (M).** Bundled themes without
-    wallpapers show gradients. The roadmap item is open. The colour engine could render
+    wallpapers show gradients. The colour engine could render
     a small mock desktop (like the overlay preview) to PNG with `sips` from an SVG/BMP.
 
 ---

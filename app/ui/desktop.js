@@ -1,5 +1,5 @@
 // Settings → Bar, Windows, Borders: Palette's pages for SketchyBar, AeroSpace
-// and JankyBorders (`palette desktop` in the terminal). Loaded after app.js
+// and JankyBorders (`palette desktop` in the terminal). Loaded after shared.js and settings.js
 // and uses its helpers (el, $, toast, invoke, themes, armed).
 "use strict";
 
@@ -142,7 +142,7 @@ const desktop = {
       this.timer = setTimeout(() => this.apply("borders"), 450);
       return;
     }
-    if (tool === "bar") this.paintBar();
+    if (tool === "bar") { this.paintBar(); this.paintFit(); }
     if (tool === "prompt") this.previewSoon();
     const bar = document.querySelector(`#dk-${tool} .dk-apply`);
     if (bar) bar.hidden = !this.dirty(tool);
@@ -237,14 +237,14 @@ const desktop = {
         el("div", { class: "dk-win", id: "bd-active" }, el("span", {}, "Focused window"))),
       el("h2", {}, "Shape"),
       this.row("Width", "Points", this.slider(t, "width", 1, 20, 0.5)),
-      this.row("Corners", null, this.select(t, "style", [["round", "Round"], ["square", "Square"]])),
+      this.row("Corners", "Round matches macOS windows; square suits square-cornered apps", this.select(t, "style", [["round", "Round"], ["square", "Square"]])),
       this.row("Sharper on Retina", "Draws at full resolution (hidpi)", this.toggle(t, "hidpi")),
       this.row("Above or below the window", "Below hides the inner half", this.select(t, "order", [["above", "Above"], ["below", "Below"]])),
       this.row("Blur", "Blurs what's behind the border (0: none)", this.slider(t, "blur_radius", 0, 40, 1)),
       el("h2", {}, "Colours"),
       this.row("Focused window", "A theme colour, so it changes with the theme", this.colour(t, "active")),
       this.row("Fade into", "A second colour makes a gradient", this.colour(t, "active_to", "No gradient")),
-      this.row("Other windows", null, this.colour(t, "inactive")),
+      this.row("Other windows", "The border of every window you're not in", this.colour(t, "inactive")),
       this.row("How visible", "0 hides the other windows' borders", this.slider(t, "inactive_opacity", 0, 100, 5, "%")),
       el("h2", {}, "No border for"),
       this.appList(t, "ignore"),
@@ -291,7 +291,12 @@ const desktop = {
   windows() {
     const t = "windows";
     const m = this.model.windows;
-    const gap = (path, label) => el("label", { class: `dk-gap dk-gap-${path.split("_")[1] || path}` }, el("span", {}, label), this.num(t, `gaps.${path}`, 0, 400));
+    const gap = (path, label) => el("label", { class: `dk-gap dk-gap-${path.split("_")[1] || path}` }, el("span", path === "outer_top" ? { id: "dk-top-label" } : {}, label), this.num(t, `gaps.${path}`, 0, 400));
+    // With a separate gap for other displays, Top is the MacBook screen's only: say so (owner
+    // changed Top while looking at another display, and nothing moved there).
+    const topLabel = () => (m.gaps.outer_top_other != null ? "Top (MacBook screen)" : "Top");
+    const topGap = gap("outer_top", topLabel());
+    topGap.querySelector("input").addEventListener("change", () => this.paintTopOther?.());
     const ws = el("div", { class: "dk-ws" });
     const boxes = () => ws.replaceChildren(...Array.from({ length: m.workspaces }, (_, i) => el("i", {}, String(i + 1))));
     boxes();
@@ -312,11 +317,13 @@ const desktop = {
     }
     return [
       el("h2", {}, "Gaps"),
-      el("p", { class: "note" }, "AeroSpace measures gaps from the space macOS gives windows: below the menu bar and beside the Dock while they're always shown, from the screen edges while they hide. Palette doesn't change the gaps when you change the bar, Dock or menu bar, so set the top gap to leave room for your bar",
-        this.barRoom ? ` (it reaches ${this.barRoom} pt down)` : "",
-        ". AeroSpace re-lays out a workspace when you next visit it. While a hidden Dock is showing, macOS gives windows less room, so they shrink until it hides again (macOS, not Palette; AeroSpace takes a moment to grow them back)."),
+      el("p", { class: "note" }, "Gaps are the empty space AeroSpace leaves around tiled windows. Top, Left, Right and Bottom are the space between the windows and the edges of the screen; the two \"Between\" gaps are the space between windows that sit next to each other."),
+      el("p", { class: "note" }, "AeroSpace counts the edge gaps from the area macOS lets windows use, not from the glass: below the menu bar and beside the Dock while they're always shown, from the screen's edges while they hide. A MacBook screen with a notch is the exception: macOS always keeps the menu bar's strip there, even with the menu bar hidden, so on the MacBook Top counts from below that strip, and your bar sits inside it."),
+      el("p", { class: "note" }, "macOS doesn't know about your bar (SketchyBar), so wherever windows can reach the top of the screen the top gap has to leave room for it",
+        this.barRoom ? ` (your bar reaches ${this.barRoom} pt down)` : "",
+        ". Palette doesn't change the gaps by itself when you change the bar, Dock or menu bar, except with Match the MacBook screen below. AeroSpace re-lays out a workspace when you next visit it. While a hidden Dock is showing, macOS gives windows less room, so they shrink until it hides again (macOS, not Palette; AeroSpace takes a moment to grow them back)."),
       el("div", { class: "dk-gaps" },
-        gap("outer_top", "Top"), gap("outer_left", "Left"), gap("outer_right", "Right"), gap("outer_bottom", "Bottom"),
+        topGap, gap("outer_left", "Left"), gap("outer_right", "Right"), gap("outer_bottom", "Bottom"),
         el("div", { class: "dk-gaps-inner" }, el("i"), el("i"), gap("inner_horizontal", "Between, across"), gap("inner_vertical", "Between, down"))),
       this.topOther(),
       el("h2", {}, "Layout"),
@@ -340,13 +347,45 @@ const desktop = {
   /** A different top gap on displays other than the built-in screen. */
   topOther() {
     const g = this.model.windows.gaps;
+    if (g.follow_bar === undefined) g.follow_bar = true;
     const on = el("input", { type: "checkbox", class: "switch" });
     on.checked = g.outer_top_other != null;
-    const n = el("input", { class: "search dk-num", type: "number", min: 0, max: 400, value: g.outer_top_other ?? g.outer_top });
-    n.hidden = !on.checked;
-    on.onchange = () => { g.outer_top_other = on.checked ? Number(n.value) : null; n.hidden = !on.checked; this.changed("windows"); };
+    // Matching the MacBook screen: the bar's reach (offset + height, a top bar Palette manages)
+    // plus Top, so windows start as far below the bar everywhere. Worked out again whenever the
+    // bar or this page is applied (`follow_bar` in the saved settings).
+    const follow = () => (this.barRoom ? this.barRoom + (Number(g.outer_top) || 0) : null);
+    const n = el("input", { class: "search dk-num", type: "number", min: 0, max: 400 });
+    const fol = el("input", { type: "checkbox", class: "switch" });
+    fol.checked = g.follow_bar;
+    const folSub = el("div", { class: "sub" });
+    const followRow = el("div", { class: "row nested" },
+      el("div", {}, el("div", { class: "title" }, "Match the MacBook screen"), folSub), fol);
+    const paint = () => {
+      const f = follow();
+      const following = g.follow_bar && f != null;
+      if (following) g.outer_top_other = on.checked ? f : g.outer_top_other;
+      n.disabled = following;
+      n.value = following ? f : (g.outer_top_other ?? g.outer_top);
+      n.hidden = !on.checked;
+      followRow.hidden = !on.checked;
+      folSub.textContent = f != null
+        ? `Other displays get your bar (${this.barRoom} pt) plus Top (${g.outer_top}): ${f} pt from the top of the screen, so windows start ${g.outer_top} pt below the bar there too, the same as on the MacBook. `
+          + "Palette works it out again whenever you change the bar or Top. Turn this off to type your own number."
+        : "Needs a bar at the top that Palette manages (Bar page) to know how tall it is. Until then, type the number yourself: your bar's height (plus its offset from the top) plus the space you want under it.";
+      const l = $("#dk-top-label");
+      if (l) l.textContent = on.checked ? "Top (MacBook screen)" : "Top";
+    };
+    this.paintTopOther = paint;
+    on.onchange = () => { g.outer_top_other = on.checked ? Number(n.value) : null; paint(); this.changed("windows"); };
+    fol.onchange = () => { g.follow_bar = fol.checked; paint(); this.changed("windows"); };
     n.onchange = () => { const v = Number(n.value); if (v >= 0 && v <= 400) { g.outer_top_other = v; this.changed("windows"); } };
-    return this.row("Different top gap on other displays", "Your MacBook screen keeps windows below the notch; an external display doesn't. On: Top is for the built-in screen, this for the others", n, on);
+    paint();
+    const main = this.row("Different top gap on other displays",
+      "Top above is measured on the MacBook screen from below the notch strip, where your bar already sits. "
+      + "An external display or an iPad (Sidecar) with the menu bar hidden has no such strip: windows can reach the very top of the screen and end up behind your bar. "
+      + "Turn this on to give those displays their own top gap, counted from the top edge of the screen, so it has to be at least as tall as your bar. Off: every display uses Top.",
+      n, on);
+    return el("div", {}, main, followRow);
   },
 
   /** Accordion padding, explained: it only shows on a workspace in accordion layout. */
@@ -476,7 +515,7 @@ const desktop = {
       blocks, el("div", { class: "actions" }, add),
       el("div", { id: "pr-opts" }),
       el("h2", {}, "Prompt sign"),
-      ...this.promptOptions("character"),
+      this.promptSign(),
       this.applyBar(t),
     ].concat(this.paintSoon(() => { this.previewSoon(0); this.paintPromptOpts(); }));
   },
@@ -550,6 +589,44 @@ const desktop = {
   },
 
   /** Rows for a module's options (the ones the page knows). */
+  /** The sign you type after (14d-4): click one, or type your own. Green after a command
+   *  worked, red after one failed: the theme's own green and red (Palette's Starship palette).
+   *  Written as Starship's `[sign](bold green)`; its special characters are escaped. */
+  promptSign() {
+    const m = this.model.prompt;
+    const SIGNS = ["❯", "➜", "λ", "›", "$", "▶", "→", "%", "#"];
+    const opts = () => m.options.character || {};
+    // `[❯](bold green)` → ❯ (backslash escapes undone); anything else is shown as typed.
+    const shown = (v) => {
+      const hit = /^\[(.*)\]\([^)]*\)$/.exec(v || "");
+      return hit ? hit[1].replace(/\\(.)/g, "$1") : (v || "");
+    };
+    const now = shown(opts().success_symbol);
+    const set = (sign) => {
+      m.options.character = m.options.character || {};
+      if (!sign) {
+        delete m.options.character.success_symbol;
+        delete m.options.character.error_symbol;
+      } else {
+        const text = sign.replace(/[\\[\]()$]/g, (c) => `\\${c}`);
+        m.options.character.success_symbol = `[${text}](bold green)`;
+        m.options.character.error_symbol = `[${text}](bold red)`;
+      }
+      this.changed("prompt");
+      this.draw("prompt");
+    };
+    const pick = (sign, label = sign) => el("button", {
+      class: `btn${(sign || "") === now ? " on" : ""}`, title: sign ? `Use ${sign}` : "Starship's own sign (❯)",
+      onclick: () => set(sign),
+    }, label);
+    const own = el("input", { class: "search dk-text", type: "text", value: SIGNS.includes(now) ? "" : now, placeholder: "Your own, e.g. >>", spellcheck: "false" });
+    own.onchange = () => set(own.value.trim());
+    return el("div", {},
+      this.row("Sign", "Green after a command worked, red after one failed: the theme's own green and red",
+        el("div", { class: "seg" }, ...SIGNS.map((x) => pick(x)), pick("", "Default"))),
+      this.row("Your own", "Any text instead; the colours still follow the theme", own));
+  },
+
   promptOptions(module) {
     const m = this.model.prompt;
     const opts = (this.promptMeta?.options || []).filter((o) => o.module === module);
@@ -675,33 +752,63 @@ const desktop = {
       el("p", { class: "note" }, "To move a whole pill, click one of its items and use Pill ◀ ▶: it walks left → centre → right. Centre pills sit in the middle of the screen: behind the notch on a MacBook screen that has one."),
       el("div", { class: "actions" }, addSide("left", "New pill on the left"), addSide("center", "New pill in the centre"), addSide("right", "New pill on the right"),
         el("span", { class: "spacer" }),
-        el("label", { class: "dk-inline" }, "Palette's theme pill ", this.paletteToggle(palettePill))),
+        el("label", { class: "dk-inline" }, "Palette's theme pill ", this.paletteToggle(palettePill)),
+        palettePill ? el("label", { class: "dk-inline", title: "Scrolling on Palette's pill steps to the next or previous theme. Off: the pill only opens Palette when clicked (also palette fav scroll on|off)" }, "Scroll on it to switch theme ", this.scrollToggle()) : null),
       el("div", { id: "dk-item" }),
       el("h2", {}, "The bar"),
-      this.row("Position", null, this.select(t, "position", [["top", "Top"], ["bottom", "Bottom"]])),
-      this.row("Height", "Points", this.num(t, "height", 16, 80)),
-      this.row("Distance from the edge", null, this.num(t, "y_offset", -40, 200)),
+      this.row("Position", "Top or bottom of every display", this.select(t, "position", [["top", "Top"], ["bottom", "Bottom"]])),
+      this.row("Height", "Points. Match the menu bar: as tall as the Mac's menu bar strip, pills and text to suit", this.num(t, "height", 10, 80),
+        this.btn("Match the menu bar", async () => {
+          try {
+            this.model.bar = await invoke("bar_match_menu_bar", { settings: this.model.bar });
+            this.changed(t);
+            this.draw(t);
+          } catch (e) { toast(String(e), true); }
+        })),
+      this.row("Distance from the edge", "Points between the screen's edge and the bar. Windows don't move with it: leave room in Windows → Top gap", this.num(t, "y_offset", -40, 200)),
       this.row("Side margins", "Space left and right of the bar", this.num(t, "margin", 0, 400)),
       this.row("Padding", "Space inside the bar's ends", this.num(t, "padding", 0, 100)),
       this.row("Background", "Behind the whole bar; none shows only the pills", this.colour(t, "background", "None")),
-      this.row("Corner radius", null, this.num(t, "corner_radius", 0, 40)),
-      this.row("Blur", null, this.num(t, "blur_radius", 0, 100)),
+      this.row("Corner radius", "Rounds the bar's background (0: square)", this.num(t, "corner_radius", 0, 40)),
+      this.row("Blur", "Blurs what's behind the bar's background (0: none)", this.num(t, "blur_radius", 0, 100)),
       el("h2", {}, "Pills"),
-      this.row("Colour", null, this.colour(t, "pill.colour")),
-      this.row("Opacity", null, this.slider(t, "pill.opacity", 0, 100, 1, "%")),
-      this.row("Height", null, this.num(t, "pill.height", 10, 80)),
-      this.row("Corner radius", null, this.num(t, "pill.corner_radius", 0, 40)),
+      this.row("Colour", "A theme colour, so it changes with the theme", this.colour(t, "pill.colour")),
+      this.row("Opacity", "How solid the pills are (100: no wallpaper shows through)", this.slider(t, "pill.opacity", 0, 100, 1, "%")),
+      this.row("Height", "Pills keep this height whatever the text size", this.num(t, "pill.height", 6, 80)),
+      el("p", { class: "warn dk-fit", hidden: "" }),
+      this.row("Corner radius", "Half the pill height gives fully round ends", this.num(t, "pill.corner_radius", 0, 40)),
       this.row("Border", "Width (0: none) and colour", this.num(t, "pill.border_width", 0, 6), this.colour(t, "pill.border_colour")),
-      this.row("Space between pills", null, this.num(t, "pill.gap", 0, 60)),
-      this.row("Space inside the ends", null, this.num(t, "pill.edge", 0, 40)),
+      this.row("Space between pills", "Points between two pills on the same side", this.num(t, "pill.gap", 0, 60)),
+      this.row("Space inside the ends", "Points between a pill's edge and its first and last item", this.num(t, "pill.edge", 0, 40)),
       el("h2", {}, "Text and icons"),
       this.row("Font", "A Nerd Font shows the icons. Only the styles the font has are listed", ...this.font()),
       this.row("Sizes", "Icons and text, points", this.num(t, "icon_size", 6, 40, 0.5), this.num(t, "label_size", 6, 40, 0.5)),
-      this.row("Icon colour", null, this.colour(t, "icon_colour")),
-      this.row("Text colour", null, this.colour(t, "text_colour")),
+      el("p", { class: "warn dk-fit", hidden: "" }),
+      this.row("Icon colour", "A theme colour, so it changes with the theme", this.colour(t, "icon_colour")),
+      this.row("Text colour", "A theme colour, so it changes with the theme", this.colour(t, "text_colour")),
       this.row("Stats refresh", "CPU, memory, network and the rest, every … seconds", this.num(t, "stats_every", 1, 600)),
       this.applyBar(t),
-    ].concat(this.paintSoon());
+    ].concat(this.paintSoon(() => this.paintFit()));
+  },
+
+  /** Pills never grow by themselves (owner): say so when the text won't fit them, or a pill is
+   *  taller than the bar (SketchyBar cuts it off). Text needs about 1.3 × its size, plus room. */
+  paintFit() {
+    const m = this.model.bar;
+    if (!m) return;
+    const size = Math.max(m.icon_size, m.label_size);
+    const need = Math.ceil(size * 1.3) + 2;
+    const msgs = [];
+    if (m.pill.height < need) {
+      msgs.push(`Text at ${size} pt needs pills about ${need} pt tall (now ${m.pill.height}): raise Pills → Height, or make the text smaller.`);
+    }
+    if (m.pill.height > m.height) {
+      msgs.push(`Pills (${m.pill.height} pt) are taller than the bar (${m.height} pt), so their tops and bottoms are cut off: raise The bar → Height.`);
+    }
+    document.querySelectorAll(".dk-fit").forEach((p) => {
+      p.textContent = msgs.join(" ");
+      p.hidden = !msgs.length;
+    });
   },
 
   /** Installed families (Nerd Fonts first) and the chosen one's real styles. */
@@ -745,6 +852,20 @@ const desktop = {
       if (c.checked) first < 0 ? m.pills.push(pill) : m.pills.splice(first, 0, pill);
       else m.pills = m.pills.filter((p) => !p.items.some((i) => i.kind === "palette"));
       this.changed("bar");
+    };
+    return c;
+  },
+
+  /** The pill's scroll switch: a Palette setting (`settings.toml`), not part of the bar's
+   *  model, so it saves at once instead of with the bar. */
+  scrollToggle() {
+    const c = el("input", { type: "checkbox", class: "switch", "aria-label": "Scroll on Palette's pill to switch theme" });
+    invoke("prefs").then((p) => { c.checked = p.bar_scroll; }).catch(() => {});
+    c.onchange = async () => {
+      try {
+        c.checked = await invoke("set_bar_scroll", { on: c.checked });
+        toast(c.checked ? "Scroll on the bar pill switches theme" : "The bar pill only opens Palette now");
+      } catch (e) { toast(String(e), true); }
     };
     return c;
   },
@@ -795,7 +916,7 @@ const desktop = {
     const sel = this.sel && this.sel.p === pi && this.sel.i === i;
     // Short, like the real bar: an icon (the dot) and a sample value.
     const SAMPLE = { cpu: "12", gpu: "4", temp: "41°", pwr: "6W", mem: "58", disk: "81", vpn: "VPN", net: "2.1M",
-      battery: "87", volume: "40", brightness: "70", weather: "31°", habits: "3/5", front_app: "Ghostty" };
+      battery: "87", volume: "40", brightness: "70", weather: "31°", habits: "3/5", dispatch: "3 read", front_app: "Ghostty" };
     let face = SAMPLE[item.kind] || k.name;
     if (item.kind === "workspaces") face = Array.from({ length: this.workspaceCount() }, (_, n) => n + 1).join(" ");
     if (item.kind === "link" || item.kind === "script") face = item.label || item.icon || k.name;
@@ -857,7 +978,7 @@ const desktop = {
       const ks = this.kinds.filter((k) => k.group === g && k.id !== "palette" && !(k.single && used.has(k.id)));
       if (!ks.length) return [];
       return [el("div", { class: "dk-menu-h" }, title), ...ks.map((k) => el("button", {
-        class: "dk-menu-i", title: k.what,
+        class: "dk-menu-i",
         onclick: () => {
           const item = { kind: k.id };
           if (k.id === "link") Object.assign(item, { label: "Link", click: "open https://example.com" });
@@ -867,11 +988,22 @@ const desktop = {
           menu.remove();
           this.changed("bar");
         },
-      }, k.name, k.network ? el("span", { class: "badge" }, "network") : null))];
+      }, el("span", { class: "dk-menu-t" }, el("span", {}, k.name, k.network ? el("span", { class: "badge" }, "network") : null),
+        k.what ? el("span", { class: "dk-menu-w" }, k.what) : null)))];
     }));
     document.querySelector(".dk-menu")?.remove();
-    anchor.after(menu);
-    setTimeout(() => document.addEventListener("click", () => menu.remove(), { once: true }));
+    // On <body> with fixed position: the bar preview clips anything inside it.
+    document.body.append(menu);
+    const r = anchor.getBoundingClientRect();
+    const below = window.innerHeight - r.bottom - 12, above = r.top - 12;
+    const down = below >= 240 || below >= above;
+    menu.style.maxHeight = `${Math.max(160, down ? below : above)}px`;
+    menu.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - menu.offsetWidth - 8))}px`;
+    if (down) menu.style.top = `${r.bottom + 4}px`; else menu.style.bottom = `${window.innerHeight - r.top + 4}px`;
+    const close = (e) => { if (e.type === "keydown" && e.key !== "Escape") return; if (e.type === "click" && menu.contains(e.target)) return; menu.remove(); off(); };
+    const off = () => { document.removeEventListener("click", close, true); document.removeEventListener("keydown", close, true); window.removeEventListener("scroll", onScroll, true); };
+    const onScroll = (e) => { if (!menu.contains(e.target)) { menu.remove(); off(); } };
+    setTimeout(() => { document.addEventListener("click", close, true); document.addEventListener("keydown", close, true); window.addEventListener("scroll", onScroll, true); });
   },
 
   /** The selected item's settings. */
@@ -911,7 +1043,15 @@ const desktop = {
     if (item.kind === "weather") {
       const units = el("select", { class: "select" }, ...["C", "F"].map((u) => { const o = el("option", { value: u }, `°${u}`); if (u === item.units) o.selected = true; return o; }));
       units.onchange = () => set("units", units.value);
-      rows.push(this.row("Place", "A city, or lat,lon. Blank guesses from your internet address", input("location", "Singapore"), units));
+      // The place is Schedule's (one place for the weather and sunrise/sunset).
+      const where = el("span", { class: "sub" }, "…");
+      invoke("schedule_get").then((sc) => {
+        where.textContent = sc.place
+          ? `${sc.place}, from Schedule`
+          : `Not set in Schedule yet: using "${item.location || "your internet address"}" until you set one there`;
+      }).catch(() => { where.textContent = "Set in Schedule"; });
+      rows.push(this.row("Place", "Set in Schedule, which sunrise and sunset use too: change it there", where,
+        this.btn("Schedule…", () => settings.show("schedule")), units));
     }
     if (item.kind === "workspaces") {
       const tg = (key) => { const x = el("input", { type: "checkbox", class: "switch" }); x.checked = !!(item[key] ?? (key === "show_apps")); x.onchange = () => set(key, x.checked); return x; };

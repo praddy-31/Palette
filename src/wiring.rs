@@ -32,6 +32,10 @@ pub enum Wiring {
     /// Configured by environment variables in `shell.sh`: wired when the
     /// `shell` target is.
     Shell,
+    /// Nothing to wire: Palette applies it itself with a command, from its
+    /// own file (the Linux desktops: KDE colour scheme, Noctalia palette,
+    /// GNOME accent). Counts as wired whenever the app is installed.
+    Direct,
 }
 
 #[derive(Debug)]
@@ -315,6 +319,7 @@ pub fn is_wired(paths: &Paths, target: &Target) -> bool {
                 .is_ok_and(|text| (setting.read)(&text) == Some((setting.value)(paths)))
         }),
         Wiring::Shell => targets::get("shell").is_some_and(|shell| is_wired(paths, shell)),
+        Wiring::Direct => true,
     }
 }
 
@@ -326,6 +331,7 @@ pub fn has_config(paths: &Paths, target: &Target) -> bool {
             .any(|p| import.create || p.is_file()),
         Wiring::Setting(setting) => (setting.configs)(paths).iter().any(|p| p.is_file()),
         Wiring::Shell => targets::get("shell").is_some_and(|shell| has_config(paths, shell)),
+        Wiring::Direct => true,
     }
 }
 
@@ -360,13 +366,12 @@ struct Write {
 /// `--remove` covers every app, so nothing of Palette's is left behind.
 pub fn run(paths: &Paths, remove: bool, dry_run: bool) -> Result<Report> {
     let settings = crate::settings::load(paths)?;
-    let (on, off): (Vec<&Target>, Vec<&Target>) = targets::ALL
-        .iter()
-        .partition(|t| remove || settings.is_on(t.name));
+    let (on, off): (Vec<&Target>, Vec<&Target>) =
+        targets::all().partition(|t| remove || settings.is_on(t.name));
     let mut report = run_for(paths, &on, remove, dry_run)?;
     report.items.extend(
         off.iter()
-            .filter(|t| !matches!(t.wiring, Wiring::Shell))
+            .filter(|t| !matches!(t.wiring, Wiring::Shell | Wiring::Direct))
             .map(|t| Item {
                 target: t.name,
                 path: None,
@@ -390,7 +395,7 @@ pub fn run_for(paths: &Paths, chosen: &[&Target], remove: bool, dry_run: bool) -
             Wiring::Setting(setting) => {
                 plan_setting(paths, target, setting, remove, &mut items, &mut writes)?
             }
-            Wiring::Shell => {}
+            Wiring::Shell | Wiring::Direct => {}
         }
     }
     if dry_run || writes.is_empty() {
@@ -722,6 +727,15 @@ fn back_up(paths: &Paths, dir: &Path, path: &Path) -> Result<()> {
 /// Replace a file's contents atomically, keeping its permissions (sketchybarrc
 /// must stay executable). If the path is a symlink (dotfiles managers), the
 /// file it points to is updated and the link is kept.
+/// Change a config Palette already wired (a target's own value, such as
+/// Zed's theme name): back it up first, then write it in place.
+pub fn change_in_place(paths: &Paths, path: &Path, text: &str) -> Result<()> {
+    let dir = backup_dir(paths);
+    back_up(paths, &dir, path)?;
+    write_in_place(path, text)?;
+    remove_old_backups(paths)
+}
+
 fn write_in_place(path: &Path, text: &str) -> Result<()> {
     if !path.exists() {
         if let Some(dir) = path.parent() {

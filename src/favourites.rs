@@ -98,6 +98,26 @@ pub fn set_cycle(paths: &Paths, cycle: Cycle) -> Result<()> {
     settings::save(paths, &s)
 }
 
+/// `palette fav scroll on|off`, Settings → Bar: whether scrolling on the bar's theme
+/// pill switches theme (`None` leaves it). Renders the active theme again when it changes, so
+/// the pill's script follows. Returns whether it's on now.
+pub fn set_bar_scroll(paths: &Paths, on: Option<bool>) -> Result<bool> {
+    let changed = {
+        let _lock = crate::lock::exclusive(paths)?;
+        let mut s = settings::load(paths)?;
+        let changed = on.is_some_and(|on| on != s.bar_scroll);
+        if let Some(on) = on {
+            s.bar_scroll = on;
+        }
+        settings::save(paths, &s)?;
+        changed
+    };
+    if changed && crate::state::current_theme(paths)?.is_some() {
+        crate::rerender(paths, None)?;
+    }
+    Ok(settings::load(paths)?.bar_scroll)
+}
+
 /// The themes to step through, alphabetical. `None`: the saved
 /// `next_cycles` setting, which falls back to every theme when there are no
 /// favourites (so the bar pill never stops working). Asking for favourites

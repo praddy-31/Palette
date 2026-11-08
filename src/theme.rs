@@ -309,8 +309,33 @@ impl Theme {
     }
 }
 
-/// Load a theme by name, with your colour edits (`edits.toml`) on top.
+/// Load a theme by name for use: your colour edits (`edits.toml`) on top, then Palette's
+/// readability fixes (`normalise`, which never touch a key you edited).
 pub fn load(paths: &Paths, name: &str) -> Result<Theme> {
+    Ok(load_fixed(paths, name)?.0)
+}
+
+/// [`load`], and what the readability fixes changed.
+pub fn load_fixed(paths: &Paths, name: &str) -> Result<(Theme, Vec<crate::normalise::Change>)> {
+    let mut theme = load_edited(paths, name)?;
+    let settings = crate::settings::load(paths).unwrap_or_default();
+    if settings.original_colours.contains(name) {
+        return Ok((theme, Vec::new()));
+    }
+    let keep = crate::edits::read(&theme.dir).into_keys().collect();
+    let roles = crate::ranking::roles_of(&theme);
+    let changes = crate::normalise::apply_all(
+        &mut theme.colors,
+        settings.readability,
+        settings.monochrome,
+        &keep,
+        roles,
+    );
+    Ok((theme, changes))
+}
+
+/// A theme with your colour edits on top, without Palette's readability fixes.
+pub fn load_edited(paths: &Paths, name: &str) -> Result<Theme> {
     let mut theme = load_original(paths, name)?;
     for (key, value) in crate::edits::read(&theme.dir) {
         theme.colors.set(&key, &value);
@@ -348,7 +373,7 @@ pub fn load_original(paths: &Paths, name: &str) -> Result<Theme> {
     }
 
     let Some((_, src)) = BUNDLED.iter().find(|(n, _)| *n == name) else {
-        bail!("no theme named `{name}`. Run `palette list` to see the available themes");
+        bail!(crate::problem::Problem::NoSuchTheme { name: name.into() });
     };
     let colors = Colors::parse(src).map_err(|p| invalid(name, "bundled", p))?;
     Ok(Theme {

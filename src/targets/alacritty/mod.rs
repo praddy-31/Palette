@@ -37,6 +37,9 @@ fn line(_: &Paths, generated: &Path) -> String {
 /// at the top when there is no such table. Alacritty loads imports first, so
 /// colours in the user's own file still win; that is their call.
 fn insert(contents: &str, block: &str) -> Result<String, String> {
+    // An empty `import = []` means the same as none: drop it, then add ours.
+    let without_empty = drop_empty_import(contents);
+    let contents = without_empty.as_deref().unwrap_or(contents);
     let has_import = contents.lines().any(|l| {
         let l = l.trim_start();
         let l = l.strip_prefix("general.").unwrap_or(l);
@@ -77,6 +80,36 @@ fn reload(_: &Paths) -> Outcome {
     }
 }
 
+/// `contents` without an empty `import = [ ]` (on one line or several), or
+/// `None` when there is no empty list. A list with paths is left alone: the
+/// user adds Palette's path to it by hand.
+fn drop_empty_import(contents: &str) -> Option<String> {
+    let lines: Vec<&str> = contents.split_inclusive('\n').collect();
+    let start = lines.iter().position(|l| {
+        let l = l.trim_start();
+        let l = l.strip_prefix("general.").unwrap_or(l);
+        l.strip_prefix("import")
+            .is_some_and(|rest| rest.trim_start().starts_with('='))
+    })?;
+    let mut text = String::new();
+    for (i, line) in lines.iter().enumerate().skip(start) {
+        text.push_str(line);
+        if let Some(close) = text.find(']') {
+            let open = text.find('[')?;
+            let inside = &text[open + 1..close];
+            let empty = inside
+                .lines()
+                .all(|l| l.trim().is_empty() || l.trim().starts_with('#'));
+            let rest_of_line = text[close + 1..].trim();
+            if !empty || !(rest_of_line.is_empty() || rest_of_line.starts_with('#')) {
+                return None;
+            }
+            return Some([lines[..start].concat(), lines[i + 1..].concat()].concat());
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -104,5 +137,22 @@ mod tests {
     #[test]
     fn existing_import_is_left_to_the_user() {
         assert!(insert("[general]\nimport = [\"a\"]\n", BLOCK).is_err());
+    }
+
+    #[test]
+    fn an_empty_import_list_is_replaced() {
+        let block = "# marker\nimport = [\"/p/alacritty.toml\"]";
+        let out = insert("[general]\nimport = [\n]\n\n[font]\nsize = 12\n", block).unwrap();
+        assert_eq!(
+            out,
+            "[general]\n# marker\nimport = [\"/p/alacritty.toml\"]\n\n[font]\nsize = 12\n"
+        );
+        let one_line = insert("[general]\nimport = []\n", block).unwrap();
+        assert_eq!(
+            one_line,
+            "[general]\n# marker\nimport = [\"/p/alacritty.toml\"]\n"
+        );
+        // A list with the user's own paths is still theirs to edit.
+        assert!(insert("[general]\nimport = [\"~/mine.toml\"]\n", block).is_err());
     }
 }

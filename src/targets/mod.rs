@@ -10,12 +10,22 @@ mod bat;
 mod borders;
 mod btop;
 mod chess_review;
+mod dispatch;
+mod easyplots;
+mod foot;
+mod fuzzel;
 mod fzf;
 mod ghostty;
+mod gnome;
+mod gnome_terminal;
 mod habit_tracker;
+mod kde;
 mod kitty;
+mod konsole;
 mod lazygit;
 mod neovim;
+mod niri;
+mod noctalia;
 mod obsidian;
 mod shell;
 mod sketchybar;
@@ -24,10 +34,12 @@ pub(crate) mod starship;
 mod tmux;
 mod vscodium;
 mod wezterm;
+pub(crate) mod zed;
 
 use anyhow::Result;
 
 use crate::paths::Paths;
+use crate::system::session::Platform;
 use crate::system::{self, Outcome};
 use crate::wiring::Wiring;
 
@@ -50,6 +62,28 @@ pub struct Target {
     pub env: fn(&Paths) -> Vec<String>,
     /// Extra `palette doctor` findings, beyond wired / not wired.
     pub doctor: fn(&Paths) -> Vec<Note>,
+    /// Where the app exists. Targets for the other system are left out of
+    /// everything (`all`): list, doctor, rendering, the app.
+    pub platforms: Platforms,
+}
+
+/// The systems a target is for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Platforms {
+    Both,
+    Mac,
+    /// Linux desktops (GNOME, KDE, Noctalia, niri).
+    Linux,
+}
+
+impl Platforms {
+    pub fn includes(self, platform: Platform) -> bool {
+        match self {
+            Self::Both => true,
+            Self::Mac => platform == Platform::Mac,
+            Self::Linux => platform == Platform::Linux,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -111,8 +145,11 @@ pub const BASE: Target = Target {
     unload: None,
     env: |_| Vec::new(),
     doctor: |_| Vec::new(),
+    platforms: Platforms::Both,
 };
 
+/// Every target, for both systems. Use [`all`] for the ones that apply here;
+/// this full list is only for checking that every template parses.
 pub const ALL: &[Target] = &[
     sketchybar::TARGET,
     sketchybar_item::TARGET,
@@ -122,6 +159,7 @@ pub const ALL: &[Target] = &[
     alacritty::TARGET,
     tmux::TARGET,
     vscodium::TARGET,
+    zed::TARGET,
     neovim::TARGET,
     obsidian::TARGET,
     btop::TARGET,
@@ -132,12 +170,28 @@ pub const ALL: &[Target] = &[
     lazygit::TARGET,
     habit_tracker::TARGET,
     chess_review::TARGET,
+    dispatch::TARGET,
+    easyplots::TARGET,
     wezterm::TARGET,
+    foot::TARGET,
+    konsole::TARGET,
+    gnome_terminal::TARGET,
+    fuzzel::TARGET,
+    gnome::TARGET,
+    kde::TARGET,
+    noctalia::TARGET,
+    niri::TARGET,
 ];
 
-/// The target named `name`.
+/// The targets for the system Palette runs on (`Platform::current`).
+pub fn all() -> impl Iterator<Item = &'static Target> {
+    let platform = Platform::current();
+    ALL.iter().filter(move |t| t.platforms.includes(platform))
+}
+
+/// The target named `name`, if it applies on this system.
 pub fn get(name: &str) -> Option<&'static Target> {
-    ALL.iter().find(|t| t.name == name)
+    all().find(|t| t.name == name)
 }
 
 /// Shared helper: a command-line tool on PATH or in Homebrew's folders.
@@ -145,8 +199,34 @@ pub fn has_program(name: &str) -> bool {
     system::find_program(name).is_some()
 }
 
-/// Shared helper: an app bundle in /Applications or ~/Applications.
+/// Shared helper: an app bundle in /Applications or ~/Applications. On Linux
+/// (`kitty.app` → `kitty`): a launcher (`.desktop` file) with that name in it,
+/// from a package, Flatpak or Snap.
 pub fn has_app(paths: &Paths, bundle: &str) -> bool {
+    if Platform::current() == Platform::Linux {
+        return has_launcher(paths, bundle.trim_end_matches(".app"));
+    }
     std::path::Path::new("/Applications").join(bundle).is_dir()
         || paths.home().join("Applications").join(bundle).is_dir()
+}
+
+fn has_launcher(paths: &Paths, name: &str) -> bool {
+    let name = name.to_lowercase().replace(' ', "-");
+    let dirs = [
+        std::path::PathBuf::from("/usr/share/applications"),
+        paths.home().join(".local/share/applications"),
+        std::path::PathBuf::from("/var/lib/flatpak/exports/share/applications"),
+        paths
+            .home()
+            .join(".local/share/flatpak/exports/share/applications"),
+        std::path::PathBuf::from("/var/lib/snapd/desktop/applications"),
+    ];
+    dirs.iter()
+        .filter_map(|d| std::fs::read_dir(d).ok())
+        .flatten()
+        .flatten()
+        .any(|e| {
+            let file = e.file_name().to_string_lossy().to_lowercase();
+            file.ends_with(".desktop") && file.contains(&name)
+        })
 }

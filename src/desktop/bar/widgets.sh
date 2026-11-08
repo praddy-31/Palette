@@ -2,7 +2,7 @@
 # Palette bar: volume, battery, brightness, weather.
 # SketchyBar calls: bash widgets.sh <volume|battery|weather|brightness>
 # Weather settings arrive as LOCATION and UNITS (C or F). Weather asks
-# wttr.in, the only pill that uses the network, and only if you add it.
+# Open-Meteo, the only pill that uses the network, and only if you add it.
 export PATH="$PATH:/opt/homebrew/bin"
 export LC_NUMERIC=C
 [ -f "$HOME/.config/palette/current/sketchybar.sh" ] && source "$HOME/.config/palette/current/sketchybar.sh"
@@ -48,22 +48,40 @@ brightness)
   sketchybar --set "$ITEM" icon="$BRIGHT" icon.color=$YELLOW label="$(printf '%.0f' "$INFO")"
   ;;
 weather)
-  DATA=$(curl -fsS -m 8 "https://wttr.in/${LOCATION// /+}?format=j1" 2>/dev/null \
-    | jq -r '.current_condition[0] | "\(.temp_C)|\(.temp_F)|\(.weatherCode)"' 2>/dev/null)
+  # Open-Meteo (free, no key; wttr.in stopped answering on 2026-11-03). LOCATION is a place
+  # name, looked up once with Open-Meteo's geocoding and kept in ~/.config/palette/cache,
+  # or "lat,lon" as it is.
+  CACHE="$HOME/.config/palette/cache/weather-place"
+  PLACE=${LOCATION%%,*}
+  if [[ "$LOCATION" =~ ^-?[0-9.]+,\ ?-?[0-9.]+$ ]]; then
+    LAT=${LOCATION%%,*}; LON=${LOCATION##*,}; LON=${LON# }
+  elif [ -f "$CACHE" ] && [ "$(head -1 "$CACHE")" = "$LOCATION" ]; then
+    LAT=$(sed -n 2p "$CACHE"); LON=$(sed -n 3p "$CACHE")
+  else
+    GEO=$(curl -fsS -m 8 -G "https://geocoding-api.open-meteo.com/v1/search" \
+      --data-urlencode "name=$PLACE" -d count=1 2>/dev/null \
+      | jq -r '.results[0] | "\(.latitude) \(.longitude)"' 2>/dev/null)
+    LAT=${GEO%% *}; LON=${GEO##* }
+    case "$LAT" in ''|null) exit 0 ;; esac
+    mkdir -p "${CACHE%/*}" && printf '%s\n%s\n%s\n' "$LOCATION" "$LAT" "$LON" > "$CACHE"
+  fi
+  if [ "$UNITS" = "F" ]; then T_UNIT=fahrenheit; else T_UNIT=celsius; fi
+  DATA=$(curl -fsS -m 8 "https://api.open-meteo.com/v1/forecast?latitude=$LAT&longitude=$LON&current=temperature_2m,weather_code,is_day&temperature_unit=$T_UNIT" 2>/dev/null \
+    | jq -r '.current | "\(.temperature_2m | round)|\(.weather_code)|\(.is_day)"' 2>/dev/null)
   [ -z "$DATA" ] && exit 0
-  TEMP_C=${DATA%%|*}; REST=${DATA#*|}; TEMP_F=${REST%%|*}; CODE=${REST##*|}
-  if [ "$UNITS" = "F" ]; then TEMP="${TEMP_F}°"; else TEMP="${TEMP_C}°"; fi
-  HOUR=$((10#$(date +%H)))
-  NIGHT=0; if [ "$HOUR" -ge 19 ] || [ "$HOUR" -lt 6 ]; then NIGHT=1; fi
+  TEMP="${DATA%%|*}°"; REST=${DATA#*|}; CODE=${REST%%|*}; DAY=${REST##*|}
+  case "$TEMP" in null*) exit 0 ;; esac
+  NIGHT=0; [ "$DAY" = "0" ] && NIGHT=1
+  # WMO weather codes (Open-Meteo's docs list them).
   case "$CODE" in
-    113) if [ $NIGHT = 1 ]; then ICON=$MOON; COLOR=$PURPLE; else ICON=$SUN; COLOR=$YELLOW; fi ;;
-    116) if [ $NIGHT = 1 ]; then ICON=$PARTLY_NIGHT; COLOR=$PURPLE; else ICON=$PARTLY_DAY; COLOR=$YELLOW; fi ;;
-    119|122) ICON=$CLOUD; COLOR=$GREY ;;
-    143|248|260) ICON=$FOG; COLOR=$GREY ;;
-    200|386|389|392|395) ICON=$STORM; COLOR=$PURPLE ;;
-    176|353) if [ $NIGHT = 1 ]; then ICON=$SHOWER_NIGHT; else ICON=$SHOWER_DAY; fi; COLOR=$CYAN ;;
-    302|305|308|314|356|359) ICON=$HEAVY_RAIN; COLOR=$IC ;;
-    179|182|185|227|230|317|320|323|326|329|332|335|338|350|362|365|368|371|374|377) ICON=$SNOW; COLOR=$CYAN ;;
+    0) if [ $NIGHT = 1 ]; then ICON=$MOON; COLOR=$PURPLE; else ICON=$SUN; COLOR=$YELLOW; fi ;;
+    1|2) if [ $NIGHT = 1 ]; then ICON=$PARTLY_NIGHT; COLOR=$PURPLE; else ICON=$PARTLY_DAY; COLOR=$YELLOW; fi ;;
+    3) ICON=$CLOUD; COLOR=$GREY ;;
+    45|48) ICON=$FOG; COLOR=$GREY ;;
+    95|96|99) ICON=$STORM; COLOR=$PURPLE ;;
+    51|53|55|56|57|80) if [ $NIGHT = 1 ]; then ICON=$SHOWER_NIGHT; else ICON=$SHOWER_DAY; fi; COLOR=$CYAN ;;
+    65|67|81|82) ICON=$HEAVY_RAIN; COLOR=$IC ;;
+    71|73|75|77|85|86) ICON=$SNOW; COLOR=$CYAN ;;
     *) ICON=$RAIN; COLOR=$CYAN ;;
   esac
   sketchybar --set "$ITEM" icon="$ICON" icon.color=$COLOR label="$TEMP"

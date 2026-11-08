@@ -22,13 +22,42 @@ impl Home {
         self.dir.path().join(".config/palette")
     }
 
+    /// Runs as on a Mac whatever system the tests run on (`PALETTE_PLATFORM`
+    /// works in fake homes): these tests were written for the Mac's targets.
+    /// `tests/linux.rs` asks for Linux with `run_env`.
     pub fn run(&self, args: &[&str]) -> Output {
         Command::new(env!("CARGO_BIN_EXE_palette"))
             .args(args)
             .env("PALETTE_HOME", self.dir.path())
+            .env("PALETTE_PLATFORM", "macos")
             .env_remove("XDG_CONFIG_HOME")
             .output()
             .unwrap()
+    }
+
+    /// `run` with extra environment variables (`PALETTE_PLATFORM`, …).
+    pub fn run_env(&self, args: &[&str], env: &[(&str, &str)]) -> Output {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_palette"));
+        command
+            .args(args)
+            .env("PALETTE_HOME", self.dir.path())
+            .env("PALETTE_PLATFORM", "macos")
+            .env_remove("XDG_CONFIG_HOME");
+        for (k, v) in env {
+            command.env(k, v);
+        }
+        command.output().unwrap()
+    }
+
+    /// `run_env`, assert success, return stdout.
+    pub fn ok_env(&self, args: &[&str], env: &[(&str, &str)]) -> String {
+        let out = self.run_env(args, env);
+        assert!(
+            out.status.success(),
+            "{args:?} failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8(out.stdout).unwrap()
     }
 
     /// Run, assert success, return stdout.

@@ -1,5 +1,5 @@
 //! Small preview images for the picker. A theme's `preview.png`, or else its
-//! first wallpaper, shrunk to 480 px with macOS's own `sips` and cached in
+//! first wallpaper, shrunk to 480 px (`pixels::thumbnail`: `sips` on macOS) and cached in
 //! `~/.config/palette/cache/thumbs/`. Wallpapers can be 6000×4000; the
 //! picker shows two dozen of them at once.
 
@@ -8,13 +8,12 @@ use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 
 use crate::paths::Paths;
-use crate::system;
 use crate::theme::Theme;
 
-const SIZE: &str = "480";
+const SIZE: u32 = 480;
 
 /// The image a theme is previewed with, if it has one.
 pub fn source(theme: &Theme) -> Result<Option<PathBuf>> {
@@ -50,14 +49,7 @@ pub fn image(paths: &Paths, src: &Path) -> Result<PathBuf> {
     }
     fs::create_dir_all(&dir)?;
     let tmp = dir.join(format!(".{:016x}.tmp.jpg", hasher.finish()));
-    let (src_arg, tmp_arg) = (src.to_string_lossy(), tmp.to_string_lossy());
-    system::run(
-        "sips",
-        &[
-            "-Z", SIZE, "-s", "format", "jpeg", &src_arg, "--out", &tmp_arg,
-        ],
-    )
-    .map_err(|e| anyhow!(e))?;
+    crate::pixels::thumbnail(src, &tmp, SIZE)?;
     fs::rename(&tmp, &thumb)?;
     Ok(thumb)
 }

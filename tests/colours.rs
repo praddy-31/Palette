@@ -34,7 +34,11 @@ fn edits_re_render_the_active_theme_and_reset() {
 fn check_fix_applies_every_suggestion() {
     let home = Home::new();
     home.ok(&["set", "white"]);
-    assert!(!home.run(&["check"]).status.success());
+    // With Palette's readability fixes on, white's faint line numbers are fixed when it's
+    // used, so check passes; --fix (writing your own edits) is tested with them off.
+    assert!(home.ok(&["check"]).contains("dark_foreground"));
+    // Turning the fixes off reports white's own colours, which fail (exit status 1).
+    assert!(!home.run(&["check", "--level", "off"]).status.success());
     let out = home.ok(&["check", "--fix"]);
     assert!(out.contains("dark_foreground"), "{out}");
     assert!(home.ok(&["check"]).contains("readable"));

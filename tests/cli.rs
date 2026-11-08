@@ -18,6 +18,34 @@ fn fresh_install_lists_bundled_themes_and_has_no_current() {
 }
 
 #[test]
+fn list_and_catalog_find_themes_by_look() {
+    // 12c: words narrow the list; every word must match.
+    let home = Home::new();
+    let warm = home.ok(&["list", "warm", "dark"]);
+    assert!(warm.contains("gruvbox-dark"), "{warm}");
+    assert!(!warm.contains("tokyo-night"), "{warm}");
+    assert!(!warm.contains("catppuccin-latte"), "{warm}");
+    let light = home.ok(&["list", "light"]);
+    assert!(
+        light.contains("catppuccin-latte") && !light.contains("gruvbox-dark"),
+        "{light}"
+    );
+    assert!(home.ok(&["list", "tokyo"]).contains("tokyo-night"));
+    let cat = home.ok(&["catalog", "purple"]);
+    assert!(
+        cat.lines().filter(|l| l.contains(" by ")).count() > 3,
+        "{cat}"
+    );
+
+    // 12b: the inspection sheet, one offline page.
+    let file = home.path("themes.html");
+    let out = home.ok(&["catalog", "--sheet", file.to_str().unwrap()]);
+    assert!(out.contains("112 themes"), "{out}");
+    let page = fs::read_to_string(&file).unwrap();
+    assert!(page.contains("function tinyDesktop") && page.contains("purple-moon"));
+}
+
+#[test]
 fn set_writes_files_and_marks_current() {
     let home = Home::new();
     let out = home.ok(&["set", "tokyo-night"]);
@@ -67,13 +95,13 @@ fn user_theme_shadows_bundled_and_light_mode_file_works() {
     let home = Home::new();
     let dir = home.add_theme(
         "tokyo-night",
-        &bundled("tokyo-night").replace("#7aa2f7", "#123456"),
+        &bundled("tokyo-night").replace("#7aa2f7", "#8ab2f9"),
     );
     fs::write(dir.join("light.mode"), "").unwrap();
     home.ok(&["set", "tokyo-night"]);
     assert!(home.ok(&["list"]).contains("tokyo-night              user"));
     let sb = home.current_file("sketchybar.sh");
-    assert!(sb.contains("ACCENT=0xff123456"), "{sb}");
+    assert!(sb.contains("ACCENT=0xff8ab2f9"), "{sb}");
     assert!(sb.contains("PALETTE_MODE=\"light\""), "{sb}");
 }
 
@@ -130,4 +158,54 @@ fn unknown_keys_only_warn() {
     let out = home.run(&["set", "extra"]);
     assert!(out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("warning: unknown key `sparkle`"));
+}
+
+/// Every command shows up once in the "Commands by job" list under `--help`, so a new command
+/// can't be left out of it (glass, performance and log were, until 2026-11-08).
+#[test]
+fn help_lists_every_command_by_job() {
+    let home = common::Home::new();
+    let help = home.ok(&["--help"]);
+    let (commands, rest) = help.split_once("Options:").unwrap();
+    let names: Vec<&str> = commands
+        .lines()
+        .skip_while(|l| !l.starts_with("Commands:"))
+        .skip(1)
+        .filter_map(|l| l.split_whitespace().next())
+        .filter(|n| *n != "help")
+        .collect();
+    let by_job = rest.split_once("Commands by job:").unwrap().1;
+    let listed: Vec<&str> = by_job
+        .lines()
+        .skip(1) // the rest of the heading's line
+        .take_while(|l| !l.trim().is_empty())
+        .filter_map(|l| l.get(19..))
+        .flat_map(|l| l.split(", "))
+        .map(str::trim)
+        .collect();
+    for name in &names {
+        let times = listed.iter().filter(|n| *n == name).count();
+        assert_eq!(
+            times, 1,
+            "`{name}` is listed {times} times under Commands by job"
+        );
+    }
+    assert!(names.len() > 30, "{names:?}");
+}
+
+/// A search that finds nothing says so; piped output carries no colour codes (`catalog`
+/// printed them anyway until 2026-11-08).
+#[test]
+fn empty_searches_say_so_and_pipes_get_plain_text() {
+    let home = Home::new();
+    let out = home.run(&["list", "purpel"]);
+    assert!(out.status.success());
+    assert!(out.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("No theme matches `purpel`"));
+    let out = home.run(&["catalog", "zzzz"]);
+    assert!(String::from_utf8_lossy(&out.stderr).contains("No theme matches `zzzz`"));
+    let catalog = home.ok(&["catalog"]);
+    assert!(catalog.contains("aetheria"), "{catalog}");
+    assert!(!catalog.contains('\x1b'), "colour codes in a pipe");
+    assert!(!home.ok(&["list"]).contains('\x1b'));
 }

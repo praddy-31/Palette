@@ -44,10 +44,12 @@ function show(s) {
 $("#undo-btn").onclick = async () => {
   $("#undo-btn").disabled = true;
   try { await invoke("step", { how: "undo" }); } // announces "Back to …" itself
-  catch (e) { $("#msg").textContent = String(e); later(SHOW_MS); }
+  catch (e) { $("#msg").textContent = e?.message ?? String(e); later(SHOW_MS); } // {message, code}
   $("#undo-btn").disabled = false;
 };
 $("#note").addEventListener("mouseenter", () => { hovered = true; clearTimeout(timer); });
 $("#note").addEventListener("mouseleave", () => { hovered = false; later(1500); });
 
 listen("switched", (e) => show(e.payload));
+// Made just now for this switch (windows on demand): the event above came while loading.
+invoke("last_switch").then((s) => { if (s) show(s); }).catch(() => {});

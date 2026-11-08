@@ -345,8 +345,8 @@ fn doctor(paths: &Paths) -> Vec<Note> {
             .to_string();
         if is_ours(&snippet_file(&vault)) && !wired.contains(&vault) {
             notes.push(Note::fix(format!(
-                "vault {name}: the palette snippet is there but switched off (Obsidian may have \
-                 rewritten its settings while open): Settings > Appearance > CSS snippets > palette"
+                "vault \"{name}\" only (other vaults are fine): the palette snippet is there but \
+                 switched off. Open that vault, then Settings > Appearance > CSS snippets > palette"
             )));
         } else if !vault.join(".obsidian/appearance.json").is_file() {
             notes.push(Note::fix(format!(

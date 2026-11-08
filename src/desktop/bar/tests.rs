@@ -76,6 +76,7 @@ fn unknown_items_are_listed() {
 }
 
 #[test]
+#[cfg(target_os = "macos")] // the Mac's targets / CoreText fonts
 fn renders_a_bar_that_reads_well() {
     let (_h, paths) = home(None);
     let mut bar = Bar::default();
@@ -236,6 +237,7 @@ fn the_theme_pill_goes_where_you_put_it() {
 }
 
 #[test]
+#[cfg(target_os = "macos")] // the Mac's targets / CoreText fonts
 fn fonts_that_dont_exist_are_named() {
     let bar = Bar {
         font: "Helvetica".into(),
@@ -351,4 +353,24 @@ fn pills_move_as_a_whole() {
     assert_eq!(bar.screen_order(), (0..bar.pills.len()).collect::<Vec<_>>());
     bar.validate().unwrap();
     assert!("middle".parse::<Place>().is_err());
+}
+
+#[test]
+fn the_dispatch_pill_listens_for_dispatch() {
+    let (_h, paths) = home(None);
+    let mut bar = Bar::default();
+    bar.pills.push(Pill {
+        side: "right".into(),
+        items: vec![Item::of("dispatch")],
+    });
+    bar.validate().unwrap();
+    let files = render(&paths, &bar).unwrap();
+    let rc = &files[0].text;
+    assert!(rc.contains("--add event dispatch_update"), "{rc}");
+    assert!(
+        rc.contains("--subscribe dispatch dispatch_update system_woke"),
+        "{rc}"
+    );
+    assert!(rc.contains("dispatch://open/research"), "{rc}");
+    assert!(files.iter().any(|f| f.path.ends_with("bar/dispatch.sh")));
 }

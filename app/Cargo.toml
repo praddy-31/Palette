@@ -1,6 +1,6 @@
 [package]
 name = "palette-app"
-version = "1.1.0"
+version = "1.2.0"
 edition = "2024"
 license = "MIT"
 description = "Palette's menu bar picker and quick-switch overlay"
@@ -14,7 +14,7 @@ palette = { path = ".." }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "1.1.8"
-tauri = { version = "2", features = ["tray-icon", "image-png", "macos-private-api"] }
+tauri = { version = "2", features = ["tray-icon", "image-png", "macos-private-api", "protocol-asset"] }
 tauri-plugin-autostart = "2"
 tauri-plugin-deep-link = "2"
 tauri-plugin-dialog = "2"

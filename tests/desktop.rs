@@ -203,3 +203,145 @@ fn pills_move_from_the_command_line() {
             .contains("the bar's")
     );
 }
+
+/// Removing Palette from every config and setting it up again leaves a managed bar as the
+/// Bar page writes it: the theme pill's line before the block that colours and places it
+/// (owner, 2026-11-08: appended at the end, the pill came out grey and out of place).
+#[test]
+fn setting_up_again_keeps_the_managed_bar_in_order() {
+    let home = home();
+    home.ok(&["desktop", "bar", "manage"]);
+    let built = home.read(".config/sketchybar/sketchybarrc");
+    home.ok(&["init", "--remove"]);
+    assert!(
+        !home
+            .read(".config/sketchybar/sketchybarrc")
+            .contains("sketchybar-item.sh")
+    );
+    home.ok(&["init"]);
+    let again = home.read(".config/sketchybar/sketchybarrc");
+    let item = again
+        .find("sketchybar-item.sh")
+        .expect("the pill is wired again");
+    let pill = again
+        .find("--set palette_pill")
+        .expect("the pill's own look");
+    assert!(item < pill, "the pill's file must come first:\n{again}");
+    assert_eq!(again, built, "the same file as the Bar page wrote");
+
+    // One app at a time (Settings → Apps) too.
+    home.ok(&["apps", "off", "sketchybar-item"]);
+    home.ok(&["apps", "on", "sketchybar-item"]);
+    assert_eq!(home.read(".config/sketchybar/sketchybarrc"), built);
+}
+
+/// A managed bar keeps its colours when Palette's lines are taken out (owner, 2026-11-08: the
+/// workspace numbers, stats and pills turned invisible): the theme's colours are written in
+/// the file before Palette's line, which overrides them while it's there.
+#[test]
+fn the_managed_bar_keeps_its_colours_without_palettes_line() {
+    let home = home();
+    home.ok(&["desktop", "bar", "manage"]);
+    let rc = home.read(".config/sketchybar/sketchybarrc");
+    let theme = home.current_file("sketchybar.sh");
+    let fallback = rc.find("C_accent=").expect("a fallback for the accent");
+    let palette_line = rc.find("current/sketchybar.sh").expect("Palette's line");
+    assert!(
+        fallback < palette_line,
+        "Palette's colours must win while wired:\n{rc}"
+    );
+    let ours = rc.lines().find_map(|l| l.strip_prefix("C_accent="));
+    let theirs = theme
+        .lines()
+        .find_map(|l| l.strip_prefix("export C_accent="));
+    assert_eq!(ours, theirs, "the active theme's accent");
+    // Every colour the file uses has a fallback.
+    for (i, _) in rc.match_indices("$C_") {
+        let name: String = rc[i + 1..]
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+            .collect();
+        assert!(rc.contains(&format!("\n{name}=")), "{name} has no fallback");
+    }
+    home.ok(&["init", "--remove"]);
+    assert!(
+        home.read(".config/sketchybar/sketchybarrc")
+            .contains("C_accent=")
+    );
+}
+
+/// "Match the menu bar": the bar as tall as the notch strip from the very top, pills the same,
+/// text to suit; a Mac without a notch gets the standard 24 pt bar.
+#[test]
+fn matching_the_menu_bar_sizes_bar_pills_and_text() {
+    let bar = palette::desktop::bar::Bar::default();
+    let notch = palette::desktop::bar::matched_to_menu_bar(&bar, 32);
+    assert_eq!(
+        (notch.height, notch.y_offset, notch.pill.height),
+        (32, 0, 32)
+    );
+    assert_eq!((notch.icon_size, notch.label_size), (13.5, 13.5));
+    let plain = palette::desktop::bar::matched_to_menu_bar(&bar, 24);
+    assert_eq!(
+        (plain.height, plain.label_size),
+        (24, 11.0),
+        "text never below 11"
+    );
+}
+
+/// The other displays' top gap follows the bar Palette manages (its reach plus the gap between
+/// windows), also after the bar changes; with Follow off it's the number you typed.
+#[test]
+fn the_other_displays_gap_follows_the_bar() {
+    let home = home();
+    home.ok(&["desktop", "bar", "manage"]);
+    home.ok(&[
+        "desktop",
+        "bar",
+        "set",
+        "position=top",
+        "y_offset=4",
+        "height=26",
+    ]);
+    home.ok(&["desktop", "windows", "manage"]);
+    home.ok(&[
+        "desktop",
+        "windows",
+        "set",
+        "gaps.outer_top=4",
+        "gaps.inner_vertical=8",
+        "gaps.outer_top_other=99",
+    ]);
+    let top = || {
+        home.read(".aerospace.toml")
+            .lines()
+            .find(|l| l.starts_with("gaps.outer.top"))
+            .unwrap_or_default()
+            .to_string()
+    };
+    assert!(
+        top().contains("[{ monitor.\"built-in\" = 4 }, 34]"),
+        "bar 4 + 26, then Top 4: {}",
+        top()
+    );
+    home.ok(&["desktop", "bar", "set", "height=32", "y_offset=0"]);
+    assert!(top().contains("}, 36]"), "follows a new bar: {}", top());
+    // A new Top moves the other displays too (32 + 10).
+    home.ok(&["desktop", "windows", "set", "gaps.outer_top=10"]);
+    assert!(top().contains("= 10 }, 42]"), "follows Top: {}", top());
+    home.ok(&["desktop", "windows", "set", "gaps.outer_top=4"]);
+    home.ok(&["desktop", "windows", "set", "gaps.follow_bar=false"]);
+    assert!(top().contains("}, 99]"), "your own number: {}", top());
+    home.ok(&["desktop", "windows", "set", "gaps.outer_top_other=off"]);
+    assert!(
+        top().ends_with("= 4"),
+        "one gap for every display: {}",
+        top()
+    );
+    // Small bars are allowed (the page warns); below the floor is still an error.
+    home.ok(&["desktop", "bar", "set", "height=10", "pill.height=6"]);
+    assert!(
+        home.fails(&["desktop", "bar", "set", "height=9"])
+            .contains("height is 10 to 80")
+    );
+}

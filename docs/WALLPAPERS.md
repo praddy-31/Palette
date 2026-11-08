@@ -1,51 +1,12 @@
-# Wallpaper sources
+# Wallpapers
 
-Collections that match Palette's themes. Checked 2026-10-12 (stars and sizes from GitHub).
-Palette can now fetch from these on request: paste a link into **Settings → Wallpapers →
-Get from a link**, or run `palette bg get <link>` (see "Wallpaper library and links"
-below). Nothing is downloaded unless you ask. You can still copy files by hand with
-`palette bg add --theme <name> <images…>`.
+Palette doesn't ship or recommend wallpaper collections: find your own, or use the ones
+that come with a theme from **Get themes**. Everything below works with pictures you
+already have, a link you paste, or wallpapers Palette paints itself. Nothing is
+downloaded unless you ask.
 
-Most collections are gathered from many artists and have **no clear licence**:
-fine for your own desktop, but don't bundle them into Palette or redistribute them.
-
-## Grab one folder, not the whole repo
-
-Several repos are gigabytes. `palette bg get` already avoids cloning them (see below). By hand, a sparse, shallow clone downloads only the folder you ask for:
-
-```sh
-git clone --depth 1 --filter=blob:none --sparse https://github.com/SleepyCatHey/CozyPixels
-cd CozyPixels
-git sparse-checkout set <folder>        # list folders first: ls, or browse on GitHub
-palette bg add --theme catppuccin-mocha <folder>/*
-```
-
-## Per theme
-
-| Theme(s) | Repo | Size | Notes |
-| --- | --- | --- | --- |
-| Tokyo Night | [tokyo-night/wallpapers](https://github.com/tokyo-night/wallpapers) | 22 MB | Made for the theme; MIT. Small, good first pick |
-| Tokyo Night | [OldJobobo/omarchy-tokyo-night-bg-addon](https://github.com/OldJobobo/omarchy-tokyo-night-bg-addon) | 53 MB | Curated extras for Omarchy's Tokyo Night |
-| Catppuccin | [orangci/walls-catppuccin-mocha](https://github.com/orangci/walls-catppuccin-mocha) | 777 MB | Large, popular (2.8k stars) |
-| Catppuccin | [zhichaoh/catppuccin-wallpapers](https://github.com/zhichaoh/catppuccin-wallpapers) | 363 MB | Sorted into folders by style |
-| Rosé Pine | [rose-pine/wallpapers](https://github.com/rose-pine/wallpapers) | 320 MB | Official Rosé Pine org |
-| Gruvbox | [AngelJumbo/gruvbox-wallpapers](https://github.com/AngelJumbo/gruvbox-wallpapers) | 1.4 GB | Folders by category; actively updated |
-| Nord | [linuxdotexe/nordic-wallpapers](https://github.com/linuxdotexe/nordic-wallpapers) | 623 MB | |
-| Everforest | [Apeiros-46B/everforest-walls](https://github.com/Apeiros-46B/everforest-walls) | 552 MB | Archived on GitHub; moved to [box.apeiros.xyz](https://box.apeiros.xyz/public/everforest_walls/) |
-| Kanagawa | [philikarus/Kanagawa-wallpapers](https://github.com/philikarus/Kanagawa-wallpapers) | 107 MB | Recoloured to the Kanagawa palette |
-
-## Mixed collections (folders by theme or mood)
-
-| Repo | Size | Notes |
-| --- | --- | --- |
-| [SleepyCatHey/CozyPixels](https://github.com/SleepyCatHey/CozyPixels) | 1.8 GB | The one you mentioned: Catppuccin, Nord, One Dark and more; updated Sept 2026 |
-| [yukazakiri/themed-wallpapers](https://github.com/yukazakiri/themed-wallpapers) | 1.7 GB | 1100+ images pre-recoloured to 22 palettes (Gruvbox, Catppuccin, …): closest to "one folder per Palette theme" |
-| [dharmx/walls](https://github.com/dharmx/walls) | 3.7 GB | The big one (9k stars); Everforest, Gruvbox, Nord folders among many |
-| [D3Ext/aesthetic-wallpapers](https://github.com/D3Ext/aesthetic-wallpapers) | 630 MB | General aesthetic set |
-| [makccr/wallpapers](https://github.com/makccr/wallpapers) | 2.7 GB | Mostly 4K and up |
-| [michaelScopic/Wallpapers](https://github.com/michaelScopic/Wallpapers) | 700 MB | Has a `tokyo-night` folder |
-| [FrenzyExists/wallpapers](https://github.com/FrenzyExists/wallpapers) | 650 MB | Personal picks |
-| [mut-ex/wallpapers](https://github.com/mut-ex/wallpapers) | 424 MB | 2560×1440 |
+Many wallpaper collections online are gathered from many artists and have **no clear
+licence**: fine for your own desktop, but check before you share or bundle them.
 
 ## Wallpaper library and links
 
@@ -93,7 +54,7 @@ and pictures go through macOS `sips`, so there is no image library.
 
   | Strength | Look |
   | --- | --- |
-  | `subtle` | The picture's own colours mostly survive, nudged towards the theme (the original Phase 5d look) |
+  | `subtle` | The picture's own colours mostly survive, nudged towards the theme |
   | `balanced` (default) | Clearly in the theme's colours, with the picture's detail kept |
   | `strong` | Close to a flat, palette-mapped look, like gowall |
 

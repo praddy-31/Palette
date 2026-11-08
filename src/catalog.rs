@@ -14,6 +14,9 @@ pub struct Entry {
     pub author: String,
     /// Completed (missing keys filled in), ready for previews and analysis.
     pub colors: Colors,
+    /// Where the roles came from: `None` = the author named them; `colors16` / `alacritty` =
+    /// only terminal colours, so roles like `dark_background` were guessed.
+    pub derived: Option<String>,
 }
 
 impl Entry {
@@ -50,6 +53,7 @@ pub fn entries() -> &'static [Entry] {
                     url: s("url")?,
                     author: s("author").unwrap_or_default(),
                     colors: Colors::parse(&text).ok()?,
+                    derived: s("derived"),
                 })
             })
             .collect()

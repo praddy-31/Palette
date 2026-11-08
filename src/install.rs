@@ -154,7 +154,7 @@ pub fn remove(paths: &Paths, name: &str) -> Result<Removal> {
         bail!("there is no theme called `{name}` (see `palette list`)");
     }
     if crate::state::current_theme(paths)?.as_deref() == Some(name) {
-        bail!("`{name}` is the active theme: switch to another one first");
+        bail!(crate::problem::Problem::ThemeActive { name: name.into() });
     }
     let result = if read_source(&dir).is_ok() {
         fs::remove_dir_all(&dir).with_context(|| format!("removing {}", dir.display()))?;
@@ -276,7 +276,14 @@ impl Fetched {
                     &from,
                 ],
             )
-            .map_err(|e| anyhow::anyhow!("downloading {url}: {e}"))?;
+            .map_err(|e| {
+                // curl's exit 63: past --max-filesize.
+                if e.contains("Maximum file size exceeded") || e.contains("(63)") {
+                    anyhow::Error::new(crate::problem::Problem::TooBig { link: url.into() })
+                } else {
+                    anyhow::anyhow!("downloading {url}: {e}")
+                }
+            })?;
             // bsdtar refuses absolute paths and `..` entries by default.
             let dir_s = dir.to_string_lossy().to_string();
             system::run(
@@ -338,13 +345,22 @@ fn build(paths: &Paths, from: &Path, name: &str, url: &str, keep: &[PathBuf]) ->
         None => match read_regular(&from.join("alacritty.toml"), 1 << 20) {
             Some(text) => (from_alacritty(&text)?, "alacritty.toml"),
             None => {
-                bail!("{url} has no colors.toml or alacritty.toml: not a theme Palette can read")
+                bail!(crate::problem::Problem::NotATheme { link: url.into() })
             }
         },
     };
     let light = from.join("light.mode").is_file()
         || table.get("mode").and_then(|v| v.as_str()) == Some("light");
-    let (colours, filled) = complete(&table, light)?;
+    let (mut colours, filled) = complete(&table, light)?;
+    // Roles guessed (from the terminal colours: an Alacritty file, or only `color0`…`color15`
+    // with no quiet text named): marked, so the readability fixes rank them (11e), as the
+    // catalogue's `derived` does for the themes it lists.
+    let named = ["muted", "dark_foreground"]
+        .iter()
+        .any(|k| table.contains_key(*k));
+    if colours_from == "alacritty.toml" || !named {
+        colours = colours.replacen('\n', &format!("\n{}\n", crate::ranking::GUESSED_MARK), 1);
+    }
     let mut files = vec!["colors.toml".to_string()];
     fs::write(partial.join("colors.toml"), colours)?;
     if light {
@@ -548,11 +564,9 @@ pub fn complete(table: &toml::Table, light: bool) -> Result<(String, Vec<String>
     let bg = v["background"].clone();
     let fg = v["foreground"].clone();
     // Away from the background: darker on dark themes, lighter on light ones.
-    let (deep, raised) = if light {
-        ("#ffffff", "#000000")
-    } else {
-        ("#000000", "#ffffff")
-    };
+    let raised = if light { "#000000" } else { "#ffffff" };
+    // A light background needs only a small step down to read as a darker shade.
+    let shade = if light { 0.25 } else { 1.0 };
     let mut fill =
         |v: &mut std::collections::BTreeMap<&str, String>, key: &'static str, value: String| {
             if !v.contains_key(key) {
@@ -575,8 +589,13 @@ pub fn complete(table: &toml::Table, light: bool) -> Result<(String, Vec<String>
     }
     let accent = v.get("blue").cloned().unwrap_or_else(|| fg.clone());
     fill(&mut v, "accent", accent);
-    fill(&mut v, "dark_background", mix(&bg, deep, 0.25));
-    fill(&mut v, "darker_background", mix(&bg, deep, 0.45));
+    // Darker than the background in both modes (THEME_SPEC; every bundled light theme).
+    fill(&mut v, "dark_background", mix(&bg, "#000000", 0.25 * shade));
+    fill(
+        &mut v,
+        "darker_background",
+        mix(&bg, "#000000", 0.45 * shade),
+    );
     fill(&mut v, "lighter_background", mix(&bg, raised, 0.08));
     fill(&mut v, "selection", mix(&bg, &fg, 0.2));
     fill(&mut v, "muted", mix(&bg, &fg, 0.4));
@@ -709,5 +728,19 @@ mod tests {
         assert!(filled.contains(&"accent".to_string()));
         assert!(filled.contains(&"cyan".to_string()));
         theme::Colors::parse(&text).unwrap();
+    }
+
+    #[test]
+    fn light_themes_get_darker_shades() {
+        // THEME_SPEC: dark/darker are darker than the background in both modes.
+        let t: toml::Table = "background = \"#eff1f5\"\nforeground = \"#4c4f69\"\n\
+            red = \"#d20f39\"\nyellow = \"#df8e1d\"\ngreen = \"#40a02b\"\nblue = \"#1e66f5\"\n"
+            .parse()
+            .unwrap();
+        let (text, _) = complete(&t, true).unwrap();
+        let c = theme::Colors::parse(&text).unwrap();
+        let lum = |k: &str| crate::colour::contrast(c.get(k), "#000000");
+        assert!(lum("dark_background") < lum("background"), "{text}");
+        assert!(lum("darker_background") < lum("dark_background"), "{text}");
     }
 }

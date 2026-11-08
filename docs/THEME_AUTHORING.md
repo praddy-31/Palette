@@ -131,7 +131,7 @@ The picker thumbnail. Any size works: Palette makes a 480 px copy and caches it.
 For hand-tuned output of one app, put a file with the target's exact output name in the
 theme folder. Palette copies it as it is instead of rendering its template.
 
-Allowed: `ghostty.conf`, `kitty.conf`, `alacritty.toml`, `vscodium.json`, `btop.theme`.
+Allowed: `ghostty.conf`, `kitty.conf`, `alacritty.toml`, `vscodium.json`, `zed.json`, `btop.theme`.
 
 Not allowed, because they can run programs or load from the web: `sketchybar.sh`,
 `borders.sh`, `shell.sh`, `tmux.conf`, `fzf.opts`, `starship.toml`, `lazygit.yml`,

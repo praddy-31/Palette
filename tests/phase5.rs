@@ -114,3 +114,30 @@ fn wallpaper_and_appearance_can_be_off_too() {
             .contains("no app named `zen`")
     );
 }
+
+#[test]
+fn the_bar_pills_scroll_can_be_turned_off_and_on() {
+    let home = Home::new();
+    home.ok(&["set", "tokyo-night"]);
+    assert!(
+        home.current_file("sketchybar-item.sh")
+            .contains("mouse.scrolled")
+    );
+    let out = home.ok(&["fav", "scroll", "off"]);
+    assert!(out.contains("off"), "{out}");
+    let item = home.current_file("sketchybar-item.sh");
+    assert!(!item.contains("mouse.scrolled"), "{item}");
+    assert!(
+        item.contains("palette://click"),
+        "the click still works: {item}"
+    );
+    assert!(
+        home.read(".config/palette/settings.toml")
+            .contains("bar_scroll = false")
+    );
+    home.ok(&["fav", "scroll", "on"]);
+    assert!(
+        home.current_file("sketchybar-item.sh")
+            .contains("mouse.scrolled")
+    );
+}

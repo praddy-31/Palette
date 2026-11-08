@@ -1,11 +1,32 @@
-//! Everything that runs another program or changes macOS. Kept in one place so
-//! it is easy to audit, and never called for a fake home (see `effects`).
+//! Everything that runs another program or changes the desktop. Kept in one
+//! place so it is easy to audit, and never called for a fake home (see
+//! `effects`). What differs between macOS and Linux lives in `system/macos.rs`
+//! and `system/linux.rs`, with the same function names; only the one for the
+//! system being built is compiled (`#[cfg(target_os = ...)]`).
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+#[cfg(target_os = "macos")]
 pub mod displays;
+#[cfg(not(target_os = "macos"))]
+#[path = "system/displays_linux.rs"]
+pub mod displays;
+#[cfg(target_os = "macos")]
 pub mod fonts;
+#[cfg(not(target_os = "macos"))]
+#[path = "system/fonts_linux.rs"]
+pub mod fonts;
+pub mod session;
+
+#[cfg(not(target_os = "macos"))]
+mod linux;
+#[cfg(target_os = "macos")]
+mod macos;
+#[cfg(not(target_os = "macos"))]
+pub use linux::*;
+#[cfg(target_os = "macos")]
+pub use macos::*;
 
 /// Result of a side effect, for the report printed after a switch.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,15 +48,32 @@ pub fn is_running(name: &str) -> bool {
 
 /// Homebrew's folders. Apps opened from Finder get a minimal `PATH`
 /// (`/usr/bin:/bin:/usr/sbin:/sbin`) without them.
-const EXTRA_PATH: [&str; 2] = ["/opt/homebrew/bin", "/usr/local/bin"];
+#[cfg(target_os = "macos")]
+fn extra_path() -> Vec<PathBuf> {
+    ["/opt/homebrew/bin", "/usr/local/bin"]
+        .map(PathBuf::from)
+        .to_vec()
+}
 
-/// `PATH` plus Homebrew's folders, for every program Palette runs, so the
+/// Your own folders (`~/.local/bin`, where Ubuntu users link `bat` to
+/// `batcat`; `~/.cargo/bin`): an SSH command or a launcher started by the
+/// desktop may not have them on `PATH`.
+#[cfg(not(target_os = "macos"))]
+fn extra_path() -> Vec<PathBuf> {
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    [".local/bin", ".cargo/bin"]
+        .iter()
+        .filter_map(|dir| home.as_ref().map(|h| h.join(dir)))
+        .collect()
+}
+
+/// `PATH` plus `extra_path()`, for every program Palette runs, so the
 /// menu bar app finds `sketchybar`, and scripts it runs (`bordersrc`) find
 /// `borders`, exactly as they do from a terminal.
 fn search_path() -> std::ffi::OsString {
     let current = std::env::var_os("PATH").unwrap_or_default();
     let mut dirs: Vec<PathBuf> = std::env::split_paths(&current).collect();
-    for extra in EXTRA_PATH.map(PathBuf::from) {
+    for extra in extra_path() {
         if !dirs.contains(&extra) {
             dirs.push(extra);
         }
@@ -68,6 +106,24 @@ pub fn find_program(name: &str) -> Option<PathBuf> {
         .map(|dir| dir.join(name))
         .find(|p| p.is_file())
 }
+
+/// `sketchybar --reload`, never two close together. A reload runs sketchybarrc in the
+/// background; a second one while it runs interleaves the two runs' `--add` commands and
+/// scrambles the bar (items between other pills, missing icons). So a reload waits until
+/// [`SKETCHYBAR_GAP`] has passed since the last one this process sent.
+pub fn reload_sketchybar() -> Result<String, String> {
+    static LAST: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(wait) = last.and_then(|t| SKETCHYBAR_GAP.checked_sub(t.elapsed())) {
+        std::thread::sleep(wait);
+    }
+    let out = run("sketchybar", &["--reload"]);
+    *last = Some(std::time::Instant::now());
+    out
+}
+
+/// Time a sketchybarrc needs to finish (the owner's, about 60 commands, takes well under this).
+pub const SKETCHYBAR_GAP: std::time::Duration = std::time::Duration::from_millis(2500);
 
 /// Run a program, turning a non-zero exit into an error message.
 pub fn run(program: &str, args: &[&str]) -> Result<String, String> {
@@ -130,58 +186,6 @@ pub fn run_env(
     }
 }
 
-/// The program inside an app (`Ghostty` → `ghostty`): its Info.plist's
-/// `CFBundleExecutable`, for apps in the usual folders. Some tools match
-/// windows by this name, not the app's.
-pub fn app_executable(app: &str) -> Option<String> {
-    let home = std::env::var_os("HOME").map(PathBuf::from);
-    let dirs = [
-        Some(PathBuf::from("/Applications")),
-        Some(PathBuf::from("/System/Applications")),
-        home.map(|h| h.join("Applications")),
-    ];
-    dirs.into_iter().flatten().find_map(|dir| {
-        let plist = dir.join(format!("{app}.app/Contents/Info.plist"));
-        if !plist.is_file() {
-            return None;
-        }
-        run(
-            "plutil",
-            &[
-                "-extract",
-                "CFBundleExecutable",
-                "raw",
-                &plist.to_string_lossy(),
-            ],
-        )
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-    })
-}
-
-/// One macOS setting (`defaults read <domain> <key>`), `None` when unset.
-pub fn defaults_read(domain: &str, key: &str) -> Option<String> {
-    run("defaults", &["read", domain, key])
-        .ok()
-        .map(|s| s.trim().to_string())
-}
-
-/// Run AppleScript (`osascript -e`). Changing settings goes through System
-/// Events, which macOS asks you to allow once (Palette already asks it for
-/// dark mode and wallpapers).
-pub fn apple_script(script: &str) -> Result<String, String> {
-    run("osascript", &["-e", script])
-}
-
-/// Minutes east of UTC in the Mac's time zone at a unix time, from
-/// `date -r <time> +%z` (`+0800` → 480). Asking `date` follows daylight
-/// saving without a time-zone library. For the schedule.
-pub fn utc_offset_minutes(ts: i64) -> Option<i32> {
-    let out = run("date", &["-r", &ts.to_string(), "+%z"]).ok()?;
-    parse_utc_offset(&out)
-}
-
 /// `+0530` → 330, `-0800` → -480.
 pub fn parse_utc_offset(text: &str) -> Option<i32> {
     let text = text.trim();
@@ -206,17 +210,6 @@ pub fn time_zone_name() -> Option<String> {
         .map(|(_, zone)| zone.to_string())
 }
 
-/// Are Apple's command-line developer tools (git, …) installed? Without
-/// them `/usr/bin/git` is a stub that pops up an install dialog.
-pub fn has_developer_tools() -> bool {
-    std::process::Command::new("/usr/bin/xcode-select")
-        .arg("-p")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .is_ok_and(|s| s.success())
-}
-
 /// Send a signal (e.g. `USR2`) to every process with this exact name.
 pub fn signal(name: &str, signal: &str) -> Result<(), String> {
     run("pkill", &[&format!("-{signal}"), "-x", name]).map(|_| ())
@@ -231,79 +224,12 @@ pub fn parse_version(text: &str) -> Option<(u32, u32)> {
     Some((parts.next()?.parse().ok()?, parts.next()?.parse().ok()?))
 }
 
-/// Current macOS appearance: `Some(true)` for dark.
-pub fn dark_mode() -> Option<bool> {
-    let out = Command::new("defaults")
-        .args(["read", "-g", "AppleInterfaceStyle"])
-        .stderr(Stdio::null())
-        .output()
-        .ok()?;
-    // The key is absent in light mode, which `defaults` reports as an error.
-    Some(String::from_utf8_lossy(&out.stdout).trim() == "Dark")
-}
-
-/// Switch macOS light/dark. The first time, macOS asks whether your terminal
-/// may control System Events.
-pub fn set_dark_mode(dark: bool) -> Result<(), String> {
-    let script = format!(
-        "tell application \"System Events\" to tell appearance preferences to set dark mode to {dark}"
-    );
-    run("osascript", &["-e", &script]).map(|_| ())
-}
-
-/// Set the wallpaper on every display. The path is passed as an argument,
-/// never pasted into the script, so odd file names cannot break out of it.
-pub fn set_wallpaper(image: &Path) -> Result<(), String> {
-    let path = image
-        .to_str()
-        .ok_or_else(|| format!("{} is not valid UTF-8", image.display()))?;
-    run(
-        "osascript",
-        &[
-            "-e",
-            "on run argv",
-            "-e",
-            "tell application \"System Events\" to tell every desktop to set picture to POSIX file (item 1 of argv)",
-            "-e",
-            "end run",
-            path,
-        ],
-    )
-    .map(|_| ())
-}
-
-/// Put text on the clipboard (`pbcopy`), for the app's Copy buttons.
-pub fn copy_to_clipboard(text: &str) -> Result<(), String> {
-    use std::io::Write;
-    let mut child = Command::new("pbcopy")
-        .stdin(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("could not run pbcopy: {e}"))?;
-    child
-        .stdin
-        .take()
-        .ok_or("no pbcopy input")?
-        .write_all(text.as_bytes())
-        .map_err(|e| e.to_string())?;
-    child.wait().map(|_| ()).map_err(|e| e.to_string())
-}
-
-/// Show a file or folder in Finder: a folder opens, a file is selected in
-/// its folder (`open -R`). Only ever given paths inside Palette's folder.
-pub fn reveal(path: &Path) -> Result<(), String> {
-    let arg = path.to_string_lossy();
-    if path.is_dir() {
-        run("open", &[&arg]).map(|_| ())
-    } else {
-        run("open", &["-R", &arg]).map(|_| ())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
+    #[cfg(target_os = "macos")]
     fn finds_homebrew_programs_with_a_minimal_path() {
         // What an app opened from Finder gets.
         let minimal = "/usr/bin:/bin:/usr/sbin:/sbin";

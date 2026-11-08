@@ -21,6 +21,7 @@ pub const TARGET: Target = Target {
     // The same bar reload as the `sketchybar` target: needed when only the
     // item changed (adding it with `init`). Runs once per switch either way.
     reload: super::sketchybar::reload,
+    platforms: super::Platforms::Mac,
     ..BASE
 };
 
