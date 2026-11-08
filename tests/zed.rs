@@ -12,6 +12,9 @@ const MINE: &str = "{\n    // Zed settings\n    \"theme\": {\n        \"mode\": 
 
 fn zed() -> Home {
     let home = Home::new();
+    // Zed counts as installed in the fake home too (`~/Applications`), so `doctor` checks it on
+    // a Mac without Zed (GitHub's runner) as on the owner's.
+    home.write("Applications/Zed.app/Contents/Info.plist", "");
     home.write(SETTINGS, MINE);
     home.ok(&["set", "tokyo-night"]);
     home
