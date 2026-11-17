@@ -42,3 +42,17 @@ white = "{{ ansi[15] }}"
 opacity = {{ g.opacity }}
 blur = {% if g.blur > 0 %}true{% else %}false{% endif %}
 {% endif -%}
+{% set f = font.alacritty -%}
+{% if f.size or f.family %}
+# Font, from Palette (Settings → Apps → Alacritty, or `palette font alacritty`). Alacritty
+# lets your own alacritty.toml win over an import: remove your [font] lines for these to show.
+[font]
+{%- if f.size %}
+size = {{ f.size }}
+{%- endif %}
+{%- if f.family %}
+
+[font.normal]
+family = "{{ f.family }}"
+{%- endif %}
+{% endif -%}

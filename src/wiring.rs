@@ -73,6 +73,15 @@ pub struct Setting {
     /// Runs before the setting is changed, or after it is restored with
     /// `remove` true. VSCodium installs and removes its theme extension here.
     pub prepare: Option<Prepare>,
+    /// Create a missing config (as `{}` text, empty for the `write` function) when its
+    /// folder exists, i.e. the app has run once (micro writes settings.json only after a
+    /// `set`). `--remove` then takes the setting out again and leaves the file.
+    pub create: bool,
+}
+
+/// A missing config that `create` may make: its folder is there.
+fn creatable(setting: &Setting, path: &Path) -> bool {
+    setting.create && !path.exists() && path.parent().is_some_and(Path::is_dir)
 }
 
 impl Import {
@@ -329,7 +338,9 @@ pub fn has_config(paths: &Paths, target: &Target) -> bool {
         Wiring::Import(import) => (import.configs)(paths)
             .iter()
             .any(|p| import.create || p.is_file()),
-        Wiring::Setting(setting) => (setting.configs)(paths).iter().any(|p| p.is_file()),
+        Wiring::Setting(setting) => (setting.configs)(paths)
+            .iter()
+            .any(|p| p.is_file() || creatable(setting, p)),
         Wiring::Shell => targets::get("shell").is_some_and(|shell| has_config(paths, shell)),
         Wiring::Direct => true,
     }
@@ -542,7 +553,7 @@ fn plan_setting(
 ) -> Result<()> {
     let configs: Vec<PathBuf> = (setting.configs)(paths)
         .into_iter()
-        .filter(|p| p.is_file())
+        .filter(|p| p.is_file() || (!remove && creatable(setting, p)))
         .collect();
     if configs.is_empty() {
         items.push(Item {
@@ -553,8 +564,11 @@ fn plan_setting(
         });
     }
     for path in configs {
-        let text =
-            fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+        let text = if path.exists() {
+            fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?
+        } else {
+            String::new()
+        };
         let ours = (setting.value)(paths);
         let current = (setting.read)(&text);
         let wired = current.as_deref() == Some(ours.as_str());

@@ -19,6 +19,13 @@ const schedule = {
       $(id).replaceChildren(el("option", { value: "" }, "Choose a theme…"),
         ...names.map((n) => { const o = el("option", { value: n }, n); if (n === this.s[key]) o.selected = true; return o; }));
     }
+    // Saved bars (Bar page → Save as…); none chosen: the bar stays as it is.
+    for (const [id, key] of [["#sc-day-bar", "day_bar"], ["#sc-night-bar", "night_bar"]]) {
+      const bars = this.s.bars || [];
+      $(id).replaceChildren(el("option", { value: "" }, bars.length ? "Keep the bar as it is" : "No saved bars yet (Bar page)"),
+        ...bars.map((n) => { const o = el("option", { value: n }, n); if (n === this.s[key]) o.selected = true; return o; }));
+      $(id).disabled = !bars.length;
+    }
   },
 
   paint() {
@@ -62,6 +69,8 @@ const schedule = {
       lon: this.s.lon,
       day_at: $("#sc-day-at").value || "07:00",
       night_at: $("#sc-night-at").value || "19:00",
+      day_bar: $("#sc-day-bar").value,
+      night_bar: $("#sc-night-bar").value,
       ...extra,
     };
     try {

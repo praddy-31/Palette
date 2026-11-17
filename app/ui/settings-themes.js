@@ -12,13 +12,21 @@ Object.assign(settings, {
     const q = $("#gt-search").value.trim().toLowerCase();
     const f = $("#gt-filter").value;
     const shown = this.catalog.filter((t) => findTheme(t, q, `${t.title} ${t.author}`) &&
-      (!f || t.mood === f || (f === "light" && t.mode === "light") || (f === "installed" && t.installed)));
+      (!f || t.mood === f || (f === "light" && t.mode === "light") || (f === "installed" && t.installed) ||
+      (f === "rex" && t.author === "Rex")));
     $("#gt-grid").replaceChildren(...shown.map((t) => this.themeCard(t)));
     if (!shown.length) $("#gt-grid").replaceChildren(el("div", { class: "empty" }, "No theme matches."));
     // Installed from a link (not in the list).
     const known = new Set(this.catalog.map((t) => t.name));
-    const others = (await invoke("installed_themes")).filter(([n]) => !known.has(n));
-    $("#gt-others").replaceChildren(...others.map(([name, url]) => el("div", { class: "row" },
+    const installed = await invoke("installed_themes");
+    const others = installed.filter(([n]) => !known.has(n));
+    // A link to a theme the catalogue knows installs that catalogue theme, so it shows as a card
+    // above, not here (owner, 2026-11-10: "only shows 10" when 26 were installed). Say so.
+    const listed = installed.length - others.length;
+    const note = installed.length ? el("div", { class: "sub" },
+      `${installed.length} installed: ${others.length} below`
+      + (listed ? `, ${listed} among the cards above (filter: Installed)` : "")) : null;
+    $("#gt-others").replaceChildren(...[note].filter(Boolean), ...others.map(([name, url]) => el("div", { class: "row" },
       el("div", {}, el("div", { class: "title" }, name), el("div", { class: "sub" }, url)),
       this.btn("Update", (b) => this.installTheme(name, b, true)),
       this.btn("Remove…", (b) => this.removeTheme(name, b)))));

@@ -26,11 +26,22 @@ pub const TARGET: Target = Target {
         read,
         write,
         prepare: Some(prepare),
+        create: false,
     }),
     installed: |paths| super::has_app(paths, "VSCodium.app") || super::has_program("codium"),
     reload,
     unload: Some(|_| Outcome::Done("switches back by itself".into())),
     doctor,
+    verify: |paths, _| {
+        Some(match installed_extension(paths) {
+            None => Outcome::Failed("Palette's theme extension isn't installed".into()),
+            Some(ext) => crate::verify::same_file(
+                &ext.join("themes/palette.json"),
+                &paths.current().join("vscodium.json"),
+                "the theme extension's file",
+            ),
+        })
+    },
     ..BASE
 };
 

@@ -12,14 +12,14 @@ use palette::{Change, Effect, Outcome, Paths, Switch, effects, state};
 
 const AFTER_HELP: &str = "\
 Commands by job:
-  Themes           list, current, set, next, prev, undo, refresh, catalog, install, update, remove, new
-  Picking          fav, recent, schedule
+  Themes           list, current, set, next, prev, undo, refresh, catalog, install, update, remove, new, rename
+  Picking          fav, recent, schedule, pin
   Colours          check, colours
   Wallpapers       bg
   Desktop          desktop
-  Windows          glass, zed, obsidian, performance
-  Setup, health    init, apps, doctor, tools, log
-  Another Mac      export, import
+  Windows, fonts   glass, zed, obsidian, performance, font
+  Setup, health    init, apps, doctor, verify, catch-up, tools, log
+  Another Mac      export, import, imported
   App              ui, hotkey
 
 Everything the app does is also a command here. Run `palette <command> --help` for details.";
@@ -97,6 +97,19 @@ enum Command {
     /// Check that every app is installed, wired and up to date
     #[command(display_order = 16)]
     Doctor,
+    /// Read back what each running app actually shows (bar colours, Rex, Zed, …), pass or fail
+    #[command(display_order = 16)]
+    Verify {
+        /// Only this app (a name from `palette apps`, or `appearance`)
+        app: Option<String>,
+    },
+    /// Send the current theme to Orca or Rex if it holds an older one (it was closed during a
+    /// switch). The Palette app does this by itself when one of them starts.
+    #[command(display_order = 16, name = "catch-up")]
+    CatchUp {
+        /// The app's name as macOS shows it: Orca, Rex
+        app: String,
+    },
     /// Show or change the hotkey that opens the quick-switch overlay
     #[command(display_order = 21)]
     Hotkey {
@@ -132,7 +145,7 @@ enum Command {
         #[arg(long, value_name = "0-100", value_parser = clap::value_parser!(u8).range(0..=100))]
         strength: Option<u8>,
     },
-    /// A window (terminals, Dispatch, EasyPlots, Habit Tracker): your own setting, solid, or see-through glass
+    /// A window (terminals, Dispatch, EasyPlots, Habit Tracker, Palette's picker and quick switcher): your own setting, solid, or see-through glass
     ///
     /// For Ghostty, kitty, Alacritty, WezTerm, Dispatch, EasyPlots and the Habit Tracker. "own" (the default) writes
     /// nothing, so the app's own config decides. Ghostty also has macOS 26's
@@ -151,6 +164,43 @@ enum Command {
         /// How strong the blur is (blurred only; Alacritty: on or off)
         #[arg(long, value_name = "0-100", value_parser = clap::value_parser!(u8).range(0..=100))]
         blur: Option<u8>,
+        /// herdr-app only: frost (Herdr shows a copy of your layout with its blur on; lasts
+        /// across restarts; needs Herdr open to switch)
+        #[arg(long, value_parser = ["on", "off"])]
+        frost: Option<String>,
+    },
+    /// Apps an import brought configs for, now installed: set them up
+    ///
+    /// After `palette import`, apps that weren't installed are remembered. Once one is, `use`
+    /// switches it on in Palette (Palette's line in the imported config, backed up first) and
+    /// `later` stops the app's popup. Palette runs no installer and starts nothing: start
+    /// SketchyBar or JankyBorders yourself with the `brew services start` shown.
+    #[command(display_order = 31)]
+    Imported {
+        /// use or later (none: list them)
+        #[arg(value_parser = ["use", "later"])]
+        action: Option<String>,
+        /// The app, e.g. sketchybar
+        app: Option<String>,
+    },
+    /// An app's font size and family, from Palette
+    ///
+    /// For Ghostty, kitty, Alacritty, WezTerm (Palette's own file for each wins over your
+    /// lines) and Zed, VSCodium (one key in their settings.json; your value is kept and put
+    /// back with --clear). Missing = your own. With only the app, this shows the setting.
+    #[command(display_order = 23)]
+    Font {
+        /// ghostty, kitty, alacritty, wezterm, zed or vscodium
+        app: String,
+        /// Points, halves allowed (13.5); `yours` gives it back
+        #[arg(long, value_name = "N|yours")]
+        size: Option<String>,
+        /// A font family (`palette desktop fonts` lists them); `yours` gives it back
+        #[arg(long, value_name = "NAME|yours")]
+        family: Option<String>,
+        /// Give both back to your own setting
+        #[arg(long, conflicts_with_all = ["size", "family"])]
+        clear: bool,
     },
     /// Performance mode: every glass window solid, a plainer bar and borders
     ///
@@ -245,6 +295,9 @@ enum Command {
         /// What a menu bar click opens: menu, picker or quick-switcher
         #[arg(long, value_name = "WHAT", value_parser = ["menu", "picker", "quick-switcher"])]
         click: Option<String>,
+        /// What opening Palette again (Finder, Spotlight) shows while it runs
+        #[arg(long, value_name = "WHAT", value_parser = ["picker", "settings", "quick-switcher"])]
+        reopen: Option<String>,
         /// Show the settings above
         #[arg(long)]
         status: bool,
@@ -270,9 +323,11 @@ enum Command {
         #[arg(long, value_name = "FILE")]
         sheet: Option<std::path::PathBuf>,
     },
-    /// Install a theme from the catalogue, a GitHub link or a folder
+    /// Install a theme from the catalogue, a GitHub link, a folder or the Rex app
     ///
     /// Takes only its colours, wallpapers and preview (never config files).
+    /// `palette install rex` installs every theme that comes with Rex; one of them
+    /// by its name (`palette install abyssal-trench`).
     #[command(display_order = 9)]
     Install {
         source: String,
@@ -394,6 +449,28 @@ enum Command {
     },
     /// The last themes you switched to, newest first
     Recent,
+    /// Show a theme by another name (picker, bar pill, `list`); `set` takes either name.
+    /// The folder keeps its name, so updates, favourites and edits keep working
+    /// Keep one app on its own theme whatever you switch to (`palette pin ghostty tokyo-night`);
+    /// no app: list the pins
+    Pin {
+        /// The app (a name from `palette apps`: ghostty, zed, sketchybar, …)
+        app: Option<String>,
+        /// The theme it keeps; leave out with --clear
+        theme: Option<String>,
+        /// Let the app follow the main theme again
+        #[arg(long, conflicts_with = "theme")]
+        clear: bool,
+    },
+    Rename {
+        /// The theme (its folder name, or the name it's shown by)
+        theme: String,
+        /// The name to show; leave out with --clear
+        name: Option<String>,
+        /// Show the folder's name again
+        #[arg(long, conflicts_with = "name")]
+        clear: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -418,6 +495,12 @@ enum ScheduleCommand {
         /// Fixed times instead of the sun: day,night, e.g. 07:00,19:00
         #[arg(long)]
         at: Option<String>,
+        /// A saved bar for the day (`palette desktop bar saved`); `none` clears it
+        #[arg(long)]
+        day_bar: Option<String>,
+        /// A saved bar for the night; `none` clears it
+        #[arg(long)]
+        night_bar: Option<String>,
     },
     /// Turn it off (the choices are kept)
     Off,
@@ -433,7 +516,7 @@ enum DesktopCommand {
     Manage,
     /// Give the config back: your original file again
     Release,
-    /// Change settings, e.g. `set height=32 pill.corner_radius=10`
+    /// Change settings, e.g. `set height=32 pill.corner_radius=10`; bar: `gpu=busy|raw`, `disk_at=80` set every GPU / disk pill
     Set {
         #[arg(required = true, value_name = "KEY=VALUE")]
         pairs: Vec<String>,
@@ -464,6 +547,63 @@ enum DesktopCommand {
         #[arg(long)]
         before: Option<String>,
     },
+    /// bar: the ready pills, whole layouts and looks (`add`, `look`)
+    Presets,
+    /// bar: add a ready pill (`add info --side left`) or switch to a whole layout (`add minimal`)
+    Add {
+        preset: String,
+        /// For a pill: left, center or right (its end)
+        #[arg(long, default_value = "right")]
+        side: String,
+    },
+    /// bar: draw the bar in a ready look (floating, solid, minimal, notch); items stay
+    Look { name: String },
+    /// bar: split a pill before its item AT (1 is the second item), e.g. `split 2 3`
+    Split {
+        /// Its number from `pills`, or an item it holds
+        pill: String,
+        at: usize,
+    },
+    /// bar: merge a pill with the next one on its side
+    Merge { pill: String },
+    /// bar: a copy of a pill next to it (without items the bar holds only once)
+    Duplicate { pill: String },
+    /// bar: one pill's own colour, e.g. `colour habits red --opacity 80`; `bar` (the bar's
+    /// pill colour) or `none` (no background)
+    Colour {
+        pill: String,
+        colour: String,
+        /// 0 to 100; `bar` for the bar's
+        #[arg(long)]
+        opacity: Option<String>,
+    },
+    /// bar: hide an item while Performance mode's "Slower bar" is on, e.g. `hide weather on`
+    Hide {
+        item: String,
+        #[arg(value_parser = ["on", "off"])]
+        on: String,
+    },
+    /// bar: save the bar as it is under a new name (that saved bar is then in use)
+    Save { name: String },
+    /// bar: switch to a saved bar
+    Use { name: String },
+    /// bar: your icon for an app, e.g. `icon Ollama :ollama:` (a glyph of the icon font, or up
+    /// to 4 characters); wins over the icon map. `--clear` gives it back to the map
+    Icon {
+        /// The app, as AeroSpace names it (`palette desktop bar icons` lists open ones)
+        app: String,
+        glyph: Option<String>,
+        #[arg(long, conflicts_with = "glyph")]
+        clear: bool,
+    },
+    /// bar: your app icons, the apps open now, and how many glyphs the icon font has
+    Icons,
+    /// bar: the saved bars (* = in use)
+    Saved,
+    /// bar: rename a saved bar
+    RenameSaved { name: String, new: String },
+    /// bar: delete a saved bar (the bar on screen stays)
+    DeleteSaved { name: String },
     /// windows: a keyboard shortcut, e.g. `bind alt-enter exec-and-forget open -a Ghostty`
     Bind {
         key: String,
@@ -718,6 +858,24 @@ fn run(cli: Cli) -> Result<()> {
             print_effects(&s.effects);
         }
         Command::Doctor => doctor(&paths)?,
+        Command::Verify { app } => verify(&paths, app.as_deref())?,
+        Command::CatchUp { app } => {
+            let names: Vec<_> = palette::TOLD_WHILE_RUNNING
+                .iter()
+                .map(|(a, _)| *a)
+                .collect();
+            if !names.contains(&app.as_str()) {
+                bail!("only these apps need it: {}", names.join(", "));
+            }
+            match palette::catch_up(&paths, &app, 1, std::time::Duration::ZERO) {
+                None => {
+                    println!("{app} already shows the current theme (or Palette doesn't theme it)")
+                }
+                Some(Outcome::Done(note)) => println!("{app}: {note}"),
+                Some(Outcome::Skipped(why) | Outcome::Unchanged(why)) => println!("{app}: {why}"),
+                Some(Outcome::Failed(e)) => bail!("{app}: {e}"),
+            }
+        }
         Command::Current => match state::current_theme(&paths)? {
             Some(name) => println!("{name}"),
             None => println!("(none: run `palette set <theme>`)"),
@@ -773,8 +931,19 @@ fn run(cli: Cli) -> Result<()> {
             kind,
             strength,
             blur,
+            frost,
         } => {
             let app = app.to_ascii_lowercase();
+            if let Some(f) = frost {
+                if app != "herdr-app" {
+                    bail!("--frost is the Herdr app's (its blur lives in a layout)");
+                }
+                if kind.is_some() || strength.is_some() {
+                    palette::glass(&paths, &app, kind, strength, None)?;
+                }
+                println!("{}", palette::herdr_frost(&paths, f == "on")?);
+                return Ok(());
+            }
             let g = palette::glass(&paths, &app, kind, strength, blur)?;
             match g.kind {
                 palette::settings::TermGlass::Own => {
@@ -787,6 +956,73 @@ fn run(cli: Cli) -> Result<()> {
                 ),
                 k => println!("{app} glass: {}, strength {}", k.as_str(), g.strength),
             }
+        }
+        Command::Imported { action, app } => match (action.as_deref(), app) {
+            (None, _) => {
+                let list = palette::arrived(&paths);
+                if list.is_empty() {
+                    println!("No app from an import is waiting to be set up.");
+                }
+                for a in list {
+                    let state = match a.state {
+                        palette::missing::Waiting::Ask => "installed, not set up yet",
+                        palette::missing::Waiting::Later => "installed, you said not now",
+                    };
+                    println!("{:<12} {state}: `palette imported use {}`", a.name, a.id);
+                    if let Some(start) = a.start {
+                        println!("{:<12} then start it yourself: {start}", "");
+                    }
+                }
+            }
+            (Some(action), Some(app)) => {
+                let app = app.to_ascii_lowercase();
+                if !palette::arrived(&paths).iter().any(|a| a.id == app) {
+                    anyhow::bail!("{app} isn't waiting (see `palette imported`)");
+                }
+                if action == "use" {
+                    let effects = palette::use_arrived(&paths, &app)?;
+                    println!("{app} now uses the imported config with Palette's colours.");
+                    print_effects(&effects);
+                } else {
+                    palette::later_arrived(&paths, &app)?;
+                    println!("{app}: not now. `palette imported use {app}` any time.");
+                }
+            }
+            (Some(_), None) => anyhow::bail!("name the app: `palette imported use sketchybar`"),
+        },
+        Command::Font {
+            app,
+            size,
+            family,
+            clear,
+        } => {
+            let app = app.to_ascii_lowercase();
+            let yours = |s: &str| s.eq_ignore_ascii_case("yours");
+            let size = match size.as_deref() {
+                _ if clear => Some(None),
+                None => None,
+                Some(s) if yours(s) => Some(None),
+                Some(s) => Some(Some(s.parse::<f32>().map_err(|_| {
+                    anyhow::anyhow!("a size is a number of points, like 14")
+                })?)),
+            };
+            let family = match family {
+                _ if clear => Some(None),
+                Some(f) if yours(&f) => Some(None),
+                f => f.map(Some),
+            };
+            if let Some(Some(f)) = &family
+                && !palette::system::fonts::families().is_empty()
+                && !palette::system::fonts::families().iter().any(|x| x == f)
+            {
+                eprintln!(
+                    "note: no font family named \"{f}\" on this Mac (`palette desktop fonts` lists them)"
+                );
+            }
+            let f = palette::font(&paths, &app, size, family)?;
+            let size = f.size.map_or("yours".into(), |s| format!("{s} pt"));
+            let family = f.family.unwrap_or_else(|| "yours".into());
+            println!("{app} font: size {size}, family {family}");
         }
         Command::Log { state, lines } => match (state.as_deref(), lines) {
             (Some("show"), _) | (None, Some(_)) => {
@@ -856,9 +1092,15 @@ fn run(cli: Cli) -> Result<()> {
             windows,
             click,
             close_idle_settings,
+            reopen,
             status,
         } => {
-            if windows.is_none() && click.is_none() && close_idle_settings.is_none() && !status {
+            if windows.is_none()
+                && click.is_none()
+                && close_idle_settings.is_none()
+                && reopen.is_none()
+                && !status
+            {
                 palette::system::open_app(overlay).map_err(anyhow::Error::msg)?;
             } else {
                 let windows = windows
@@ -874,10 +1116,18 @@ fn run(cli: Cli) -> Result<()> {
                     &paths,
                     close_idle_settings.as_deref().map(|v| v == "on"),
                 )?;
+                let reopen = palette::set_reopen(
+                    &paths,
+                    reopen
+                        .as_deref()
+                        .map(palette::settings::Reopen::parse)
+                        .transpose()?,
+                )?;
                 println!(
-                    "Windows: {}\nMenu bar click: {}\nClose idle Settings: {}",
+                    "Windows: {}\nMenu bar click: {}\nOpening again: {}\nClose idle Settings: {}",
                     w.as_str(),
                     c.as_str(),
+                    reopen.as_str(),
                     if idle { "on" } else { "off" }
                 );
             }
@@ -929,6 +1179,16 @@ fn run(cli: Cli) -> Result<()> {
             );
         }
         Command::Catalog { words, .. } => catalog(&paths, &words.join(" ")),
+        Command::Install { source, name } if source == "rex" && name.is_none() => {
+            let done = palette::install::install_rex(&paths)?;
+            for d in &done {
+                print_installed(d);
+            }
+            println!(
+                "{} of Rex's themes installed (the others you have already)",
+                done.len()
+            );
+        }
         Command::Install { source, name } => {
             println!("Downloading…");
             let done = palette::install::install(&paths, &source, name.as_deref())?;
@@ -961,6 +1221,13 @@ fn run(cli: Cli) -> Result<()> {
                 eprintln!("warning: {}", done.message(&name));
             } else {
                 println!("{}", done.message(&name));
+            }
+            let freed = palette::unpin_theme(&paths, &name)?;
+            if !freed.is_empty() {
+                eprintln!(
+                    "warning: {} pinned to {name}: now following the main theme",
+                    freed.join(", ")
+                );
             }
         }
         Command::Check {
@@ -997,6 +1264,17 @@ fn run(cli: Cli) -> Result<()> {
                     };
                     println!("{:<5} {:<34} {why}", v.grade, v.app);
                 }
+                // What each kind of app selects in (23b).
+                let name = match theme.clone() {
+                    Some(t) => t,
+                    None => state::current_theme(&paths)?.unwrap_or_default(),
+                };
+                if !name.is_empty() {
+                    println!("\nSelections:");
+                    for u in palette::check::selections(&paths, &name)? {
+                        println!("  {}  {:<26} {}", u.hex, u.what, u.apps);
+                    }
+                }
             } else {
                 check(
                     &paths,
@@ -1014,6 +1292,23 @@ fn run(cli: Cli) -> Result<()> {
         } => colours(&paths, theme, set, reset, fix)?,
         Command::Desktop { tool, command } => desktop(&paths, tool.as_deref(), command)?,
         Command::Fav { command } => fav(&paths, command.unwrap_or(FavCommand::List))?,
+        Command::Pin { app, theme, clear } => pin(&paths, app.as_deref(), theme.as_deref(), clear)?,
+        Command::Rename { theme, name, clear } => {
+            if name.is_none() && !clear {
+                println!(
+                    "{}",
+                    palette::title(&paths, &palette::resolve(&paths, &theme))
+                );
+            } else {
+                let theme = palette::resolve(&paths, &theme);
+                let shown = palette::rename(&paths, &theme, name.as_deref())?;
+                if shown == theme {
+                    println!("{theme} is shown by its own name");
+                } else {
+                    println!("{theme} is shown as \"{shown}\"");
+                }
+            }
+        }
         Command::Recent => {
             let current = state::current_theme(&paths)?;
             for name in palette::favourites::recents(&paths) {
@@ -1249,10 +1544,36 @@ fn desktop(paths: &Paths, tool: Option<&str>, command: Option<DesktopCommand>) -
         }
         Some(DesktopCommand::Pills) => {
             let bar = bar_settings(paths, tool)?;
+            let needs = desktop::bar::live::needs(paths);
             for (n, &i) in bar.screen_order().iter().enumerate() {
                 let p = &bar.pills[i];
-                let items: Vec<&str> = p.items.iter().map(|it| it.kind.as_str()).collect();
-                println!("{:>2}  {:<7} {}", n + 1, p.side, items.join(" "));
+                let items: Vec<String> = p
+                    .items
+                    .iter()
+                    .map(|it| {
+                        let mut s = it.kind.clone();
+                        if it.hide_in_performance {
+                            s.push_str(" (hidden in Performance mode)");
+                        }
+                        s
+                    })
+                    .collect();
+                let look = match (p.colour.as_str(), p.opacity) {
+                    ("", None) => String::new(),
+                    ("none", _) => "  [no background]".into(),
+                    (c, o) => format!(
+                        "  [{}{}]",
+                        if c.is_empty() { "bar colour" } else { c },
+                        o.map(|o| format!(" {o}%")).unwrap_or_default()
+                    ),
+                };
+                println!("{:>2}  {:<7} {}{look}", n + 1, p.side, items.join(" "));
+            }
+            // Why an item can't work here, on lines of their own (they depend on this Mac).
+            for it in bar.pills.iter().flat_map(|p| &p.items) {
+                if let Some(note) = needs.get(&it.kind) {
+                    println!("note: {}: {note}", it.kind);
+                }
             }
             println!(
                 "Move one: palette desktop bar move <number or item> left|center|right|next|prev"
@@ -1269,6 +1590,163 @@ fn desktop(paths: &Paths, tool: Option<&str>, command: Option<DesktopCommand>) -
             };
             bar.move_pill(from, place)?;
             desktop::set(paths, tool, toml::Value::try_from(&bar)?)?
+        }
+        Some(DesktopCommand::Presets) => {
+            bar_settings(paths, tool)?;
+            use desktop::bar::presets::{LOOKS, PRESETS};
+            println!("Pills (palette desktop bar add <name> --side left|center|right):");
+            for p in PRESETS.iter().filter(|p| p.sort == "pill") {
+                println!("  {:<14} {}", p.id, p.what);
+            }
+            println!("Whole layouts, replacing every pill (palette desktop bar add <name>):");
+            for p in PRESETS.iter().filter(|p| p.sort == "layout") {
+                println!("  {:<14} {}", p.id, p.what);
+            }
+            println!("Looks, items stay (palette desktop bar look <name>):");
+            for l in LOOKS {
+                println!("  {:<14} {}", l.id, l.what);
+            }
+            return Ok(());
+        }
+        Some(DesktopCommand::Add { preset, side }) => {
+            let mut bar = bar_settings(paths, tool)?;
+            let side = if side == "centre" {
+                "center".into()
+            } else {
+                side
+            };
+            let have = |k: &str| desktop::bar::live::have(paths, k);
+            let added = desktop::bar::presets::add(&mut bar, &preset, &side, &have)?;
+            for s in &added.skipped {
+                println!("left out {s}");
+            }
+            desktop::set(paths, tool, toml::Value::try_from(&bar)?)?
+        }
+        Some(DesktopCommand::Look { name }) => {
+            let bar = bar_settings(paths, tool)?;
+            let bar =
+                desktop::bar::presets::with_look(&bar, &name, palette::system::menu_bar_height())?;
+            desktop::set(paths, tool, toml::Value::try_from(&bar)?)?
+        }
+        Some(DesktopCommand::Split { pill, at }) => change_bar(paths, tool, |bar| {
+            let p = bar.find_pill(&pill)?;
+            bar.split_pill(p, at).map(drop)
+        })?,
+        Some(DesktopCommand::Merge { pill }) => change_bar(paths, tool, |bar| {
+            let p = bar.find_pill(&pill)?;
+            bar.merge_pill(p).map(drop)
+        })?,
+        Some(DesktopCommand::Duplicate { pill }) => change_bar(paths, tool, |bar| {
+            let p = bar.find_pill(&pill)?;
+            bar.duplicate_pill(p).map(drop)
+        })?,
+        Some(DesktopCommand::Colour {
+            pill,
+            colour,
+            opacity,
+        }) => change_bar(paths, tool, |bar| {
+            let p = bar.find_pill(&pill)?;
+            bar.pills[p].colour = if colour == "bar" {
+                String::new()
+            } else {
+                colour
+            };
+            match opacity.as_deref() {
+                None => {}
+                Some("bar") => bar.pills[p].opacity = None,
+                Some(o) => {
+                    bar.pills[p].opacity = Some(
+                        o.parse()
+                            .with_context(|| format!("`{o}`: an opacity 0 to 100"))?,
+                    )
+                }
+            }
+            Ok(())
+        })?,
+        Some(DesktopCommand::Hide { item, on }) => change_bar(paths, tool, |bar| {
+            let mut found = false;
+            for i in bar.pills.iter_mut().flat_map(|p| p.items.iter_mut()) {
+                if i.kind == item && i.kind != "palette" {
+                    i.hide_in_performance = on == "on";
+                    found = true;
+                }
+            }
+            if !found {
+                bail!("the bar has no `{item}` (palette desktop bar pills)");
+            }
+            Ok(())
+        })?,
+        Some(DesktopCommand::Icon { app, glyph, clear }) => {
+            bar_settings(paths, tool)?;
+            if glyph.is_none() && !clear {
+                bail!("give an icon (`:ollama:`) or --clear");
+            }
+            if let Some(g) = glyph.as_deref().filter(|g| g.starts_with(':')) {
+                let known = desktop::bar::glyphs(paths);
+                if !known.is_empty() && !known.iter().any(|k| k == g) {
+                    eprintln!(
+                        "warning: {g} isn't in the icon font's map: the bar shows nothing for it (palette desktop bar icons)"
+                    );
+                }
+            }
+            desktop::bar::set_icon(paths, &app, if clear { None } else { glyph.as_deref() })?
+        }
+        Some(DesktopCommand::Icons) => {
+            let bar = bar_settings(paths, tool)?;
+            let glyphs = desktop::bar::glyphs(paths);
+            if glyphs.is_empty() {
+                println!(
+                    "The icon font's map isn't installed (~/.config/sketchybar/helpers/icon_map.sh): workspaces show •"
+                );
+            } else {
+                println!(
+                    "{} glyphs in the icon font's map (e.g. {})",
+                    glyphs.len(),
+                    glyphs.iter().take(4).cloned().collect::<Vec<_>>().join(" ")
+                );
+            }
+            for (app, glyph) in &bar.icons {
+                println!("  {app:<24} {glyph}   (yours)");
+            }
+            for app in desktop::bar::open_apps(paths) {
+                if !bar.icons.contains_key(&app) {
+                    println!("  {app:<24} -   (the map's)");
+                }
+            }
+            return Ok(());
+        }
+        Some(DesktopCommand::Save { name }) => {
+            bar_settings(paths, tool)?;
+            let name = desktop::bar::saved::save_as(paths, &name, None)?;
+            println!("saved    the bar as `{name}` (in use: changes go into it)");
+            return Ok(());
+        }
+        Some(DesktopCommand::Use { name }) => {
+            bar_settings(paths, tool)?;
+            desktop::bar::saved::use_bar(paths, &name)?
+        }
+        Some(DesktopCommand::Saved) => {
+            bar_settings(paths, tool)?;
+            let list = desktop::bar::saved::list(paths);
+            if list.is_empty() {
+                println!("No saved bars yet: palette desktop bar save <name>");
+            }
+            for s in list {
+                println!("{} {}", if s.in_use { "*" } else { " " }, s.name);
+            }
+            return Ok(());
+        }
+        Some(DesktopCommand::RenameSaved { name, new }) => {
+            bar_settings(paths, tool)?;
+            let new = desktop::bar::saved::rename(paths, &name, &new)?;
+            println!("renamed  to `{new}`");
+            return Ok(());
+        }
+        Some(DesktopCommand::DeleteSaved { name }) => {
+            bar_settings(paths, tool)?;
+            let name = desktop::bar::saved::delete(paths, &name)?;
+            println!("deleted  the saved bar `{name}` (the bar on screen stays)");
+            return Ok(());
         }
         Some(DesktopCommand::Unbind { key, mode }) => bind(paths, tool, |list| {
             let before = list.len();
@@ -1340,10 +1818,21 @@ fn ansi(s: &palette::desktop::prompt::Span) -> String {
 
 /// Change the windows shortcuts list, then save it like any setting.
 /// The bar's saved settings, for the pill commands.
+/// Change the bar's settings and apply them (a backup first, as any change).
+fn change_bar(
+    paths: &Paths,
+    tool: palette::desktop::Tool,
+    change: impl FnOnce(&mut palette::desktop::bar::Bar) -> Result<()>,
+) -> Result<palette::desktop::Applied> {
+    let mut bar = bar_settings(paths, tool)?;
+    change(&mut bar)?;
+    palette::desktop::set(paths, tool, toml::Value::try_from(&bar)?)
+}
+
 fn bar_settings(paths: &Paths, tool: palette::desktop::Tool) -> Result<palette::desktop::bar::Bar> {
     use palette::desktop::{self, Tool};
     if tool != Tool::Bar {
-        bail!("pills are the bar's: palette desktop bar pills / move …");
+        bail!("that's one of the bar's commands: palette desktop bar …");
     }
     Ok(desktop::get(paths, tool)?.try_into()?)
 }
@@ -1455,6 +1944,7 @@ fn fav(paths: &Paths, command: FavCommand) -> Result<()> {
 
 fn list(paths: &Paths, q: &str) -> Result<()> {
     let current = state::current_theme(paths)?;
+    let names = palette::settings::load(paths).unwrap_or_default().names;
     let colour = colour_out();
     let mut shown = 0;
     for (name, origin) in theme::list(paths)? {
@@ -1479,11 +1969,21 @@ fn list(paths: &Paths, q: &str) -> Result<()> {
             Ok(_) => "",
             Err(_) => "invalid",
         };
+        // installed / yours, and edited (17d); bundled themes say so.
+        let origin = match loaded.as_ref().map(theme::badges) {
+            Ok(b) if !b.is_empty() && origin == "user" => b.join(","),
+            Ok(b) if !b.is_empty() => format!("{origin},{}", b.join(",")),
+            _ => origin.to_string(),
+        };
         let strip = match (&loaded, colour) {
             (Ok(t), true) => format!("{}  ", swatches(t)),
             _ => String::new(),
         };
-        println!("{mark} {strip}{name:<24} {origin:<8} {mode}");
+        let title = names
+            .get(&name)
+            .map(|t| format!("  \"{t}\""))
+            .unwrap_or_default();
+        println!("{mark} {strip}{name:<24} {origin:<16} {mode}{title}");
         shown += 1;
     }
     no_match(shown, q);
@@ -1635,6 +2135,28 @@ fn import(paths: &Paths, dir: &std::path::Path, dry_run: bool) -> Result<()> {
     if !apps.is_empty() {
         println!("Configs for: {}", apps.join(", "));
     }
+    let needs = palette::import_needs(paths, &r);
+    if !needs.is_empty() {
+        let names: Vec<&str> = needs.iter().map(|m| m.name).collect();
+        println!("\nNot on this Mac yet: {}", names.join(", "));
+        for m in needs.iter().filter(|m| m.commands.is_empty()) {
+            println!(
+                "  {}: not in Homebrew, get it from {}",
+                m.name,
+                m.site.unwrap_or("its website")
+            );
+        }
+        let script = palette::missing::script(&needs);
+        if !script.is_empty() {
+            println!("To get them, copy these into a terminal (Palette runs none of them):");
+            for line in script {
+                println!("  {line}");
+            }
+        }
+        println!(
+            "Their configs are imported either way; each app uses its own when you install it."
+        );
+    }
     if dry_run {
         println!("Dry run: nothing changed.");
         return Ok(());
@@ -1665,6 +2187,68 @@ fn hotkey(paths: &Paths, combo: Option<String>) -> Result<()> {
             );
         }
     }
+    Ok(())
+}
+
+fn pin(paths: &Paths, app: Option<&str>, theme: Option<&str>, clear: bool) -> Result<()> {
+    let Some(app) = app else {
+        let pins = palette::pins(paths)?;
+        if pins.is_empty() {
+            println!(
+                "No pinned apps: every app follows the main theme (`palette pin <app> <theme>`)."
+            );
+        }
+        for p in pins {
+            let note = if p.missing {
+                "  (theme gone: follows the main theme; `--clear`)"
+            } else {
+                ""
+            };
+            println!("  {:<14} {}{note}", p.app, palette::title(paths, &p.theme));
+        }
+        return Ok(());
+    };
+    match (theme, clear) {
+        (None, false) => {
+            let pins = palette::pins(paths)?;
+            match pins.iter().find(|p| p.app == app) {
+                Some(p) => println!("{app} keeps {}", palette::title(paths, &p.theme)),
+                None => println!("{app} follows the main theme"),
+            }
+            return Ok(());
+        }
+        (t, _) => {
+            let done = palette::pin(paths, app, t)?;
+            match t {
+                Some(t) => println!(
+                    "{app} keeps {} whatever you switch to",
+                    palette::title(paths, &palette::resolve(paths, t))
+                ),
+                None => println!("{app} follows the main theme again"),
+            }
+            if let Some(s) = done {
+                print_effects(&s.effects);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn verify(paths: &Paths, app: Option<&str>) -> Result<()> {
+    let rows = palette::verify::run(paths, app)?;
+    for row in &rows {
+        let (sign, text) = match &row.outcome {
+            Outcome::Done(t) => ("ok ", t),
+            Outcome::Failed(t) => ("!! ", t),
+            Outcome::Skipped(t) | Outcome::Unchanged(t) => ("-  ", t),
+        };
+        println!("  {:<14} {sign} {text}", row.name);
+    }
+    let failed = rows.iter().filter(|r| r.failed()).count();
+    if failed > 0 {
+        bail!("{failed} app(s) don't show the current theme, see !! above");
+    }
+    println!("Every app checked shows the current theme.");
     Ok(())
 }
 
@@ -1702,7 +2286,13 @@ fn report(s: &Switch, paths: &Paths) {
     if s.dry_run {
         println!("Would switch to {} (dry run, nothing written):", s.theme);
     } else {
-        println!("Switched to {} -> {}", s.theme, paths.current().display());
+        let title = palette::title(paths, &s.theme);
+        let shown = if title == s.theme {
+            title
+        } else {
+            format!("{title} ({})", s.theme)
+        };
+        println!("Switched to {shown} -> {}", paths.current().display());
     }
     print_changes(s);
     print_effects(&s.effects);
@@ -1792,7 +2382,8 @@ fn catalog(paths: &Paths, q: &str) {
         .collect();
     let colour = colour_out();
     let mut shown = 0;
-    for e in palette::catalog::entries().iter().filter(|e| {
+    let rex = palette::catalog::rex_entries(paths);
+    for e in palette::catalog::entries().iter().chain(&rex).filter(|e| {
         let tags = palette::search::tags(&e.colors);
         palette::search::matches(&format!("{} {}", e.name, e.title), &tags, q)
     }) {
@@ -1818,6 +2409,11 @@ fn catalog(paths: &Paths, q: &str) {
     }
     no_match(shown, q);
     println!("\n* installed. Install one: palette install <name>");
+    if !rex.is_empty() {
+        println!(
+            "Themes by Rex come from the Rex app on this Mac: palette install rex (all of them)"
+        );
+    }
 }
 
 fn print_installed(done: &palette::install::Installed) {
@@ -2164,6 +2760,8 @@ fn schedule(paths: &Paths, command: Option<ScheduleCommand>) -> Result<()> {
             lat,
             lon,
             at,
+            day_bar,
+            night_bar,
         }) => {
             let update = sch::Update {
                 day,
@@ -2172,6 +2770,8 @@ fn schedule(paths: &Paths, command: Option<ScheduleCommand>) -> Result<()> {
                 lat,
                 lon,
                 at,
+                day_bar,
+                night_bar,
             };
             let result = sch::enable(paths, update)?;
             println!("Schedule on.");
@@ -2338,6 +2938,17 @@ fn schedule_show(paths: &Paths) -> Result<()> {
             &s.night
         }
     );
+    if !s.day_bar.is_empty() || !s.night_bar.is_empty() {
+        let or = |b: &str| {
+            if b.is_empty() {
+                "(stays)".to_string()
+            } else {
+                b.to_string()
+            }
+        };
+        println!("  day bar      {}", or(&s.day_bar));
+        println!("  night bar    {}", or(&s.night_bar));
+    }
     match s.mode {
         Mode::Fixed => println!(
             "  fixed times  day {}, night {}",

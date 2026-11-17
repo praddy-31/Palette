@@ -237,7 +237,7 @@ fn list_marks_light_themes() {
     let home = Home::new();
     let list = home.ok(&["list"]);
     assert!(
-        list.contains("rose-pine-dawn           bundled  light"),
+        list.contains("rose-pine-dawn           bundled          light"),
         "{list}"
     );
     assert!(

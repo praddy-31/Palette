@@ -58,12 +58,12 @@ Object.assign(settings, {
         el("div", { class: "title" }, `${LABEL[i.fg] || i.fg} on ${(LABEL[i.bg] || i.bg).toLowerCase()}: ${i.ratio.toFixed(1)}:1, needs ${i.min}`),
         el("div", { class: "sub" }, `${i.used_for}${i.applied ? ". Palette already lifts it where it can" : ""}`)),
       el("span", { class: "co-arrow" }, "→"),
-      chip(i.suggested, i.bg_hex),
-      el("code", {}, i.suggested),
-      this.btn("Apply", () => this.coEdit({ how: "set", colours: [[i.fg, i.suggested]] }))));
+      i.key === i.bg ? chip(i.fg_hex, i.suggested) : chip(i.suggested, i.bg_hex),
+      el("code", {}, i.key === i.fg ? i.suggested : `${LABEL[i.key] || i.key} ${i.suggested}`),
+      this.btn("Apply", () => this.coEdit({ how: "set", colours: [[i.key, i.suggested]] }))));
     const covered = new Set(s.fixed.map((f) => f.key));
     for (const [n, i] of s.issues.entries()) {
-      if (covered.has(i.fg) || covered.has(i.bg)) {
+      if (covered.has(i.key) || covered.has(i.fg) || covered.has(i.bg)) {
         rows[n].querySelector(".sub").append(" · Palette's fix covers this when the theme is used");
       }
     }
@@ -115,6 +115,14 @@ Object.assign(settings, {
       out.push(el("div", { class: "sub co-fixed-head" }, `On glass in ${app} (over this theme's wallpaper):`),
         ...lines.map((l) => el("div", { class: "sub co-glass" }, l)));
     }
+    // Selections (23b): the colour each kind of app really selects in, after fixes and edits.
+    if (s.selections?.length) {
+      out.push(el("div", { class: "sub co-fixed-head" }, `What each app selects in with ${s.theme}:`),
+        ...s.selections.map((u) => el("div", { class: "row co-app" },
+          chip(u.text, u.hex),
+          el("div", {}, el("div", { class: "title" }, `${u.what} · ${u.hex}`),
+            el("div", { class: "sub" }, `${u.apps}${u.key === "selection" ? "" : ` · from ${LABEL[u.key] || u.key}`}`)))));
+    }
     // Per app (11i): what each kind of app draws with these colours.
     if (s.apps?.length) {
       out.push(el("div", { class: "sub co-fixed-head" }, `How ${s.theme} works in each kind of app:`),
@@ -149,13 +157,14 @@ Object.assign(settings, {
         line("1", span("muted", "// colours from your theme")),
         line("2", span("magenta", "fn "), span("blue", "main"), "() {"),
         line("3", "    ", span("magenta", "let "), "name = ", span("green", "\"palette\""), ";"),
-        el("div", { class: "ln", style: { background: c.selection } },
+        el("div", { class: "ln", style: { background: c.editor_selection || c.selection } },
           el("i", { style: { color: c.dark_foreground } }, "4"),
           span("bright_foreground", "    selected line, "), span("yellow", "42"), span("bright_foreground", " items")),
         line("5", "    ", span("cyan", "println!"), "(", span("orange", "\"{name}\""), ");"),
         line("6", "}"),
         el("div", { class: "co-term", style: { background: c.dark_background } },
-          span("accent", "~/palette "), span("magenta", "main "), span("green", "❯ "), "cargo test",
+          span("accent", "~/palette "), span("magenta", "main "), span("green", "❯ "), "cargo ",
+          span("bright_foreground", "test", { background: c.selection }),
           el("br"), span("red", "error"), ": one failed  ", span("yellow", "warning"), ": unused  ", span("green", "ok"), span("muted", "  (2 ignored)"),
           el("br"), ...["red", "yellow", "green", "cyan", "blue", "magenta"].map((k) => span(k, "■ ")),
           ...["bright_red", "bright_yellow", "bright_green", "bright_cyan", "bright_blue", "bright_magenta"].map((k) => span(k, "■ ")))));
@@ -163,7 +172,7 @@ Object.assign(settings, {
 
   coGrid() {
     const groups = [
-      ["Backgrounds", ["background", "dark_background", "darker_background", "lighter_background", "selection"]],
+      ["Backgrounds", ["background", "dark_background", "darker_background", "lighter_background", "selection", "editor_selection"]],
       ["Text", ["foreground", "dark_foreground", "light_foreground", "bright_foreground", "muted"]],
       ["Accent and colours", ["accent", "red", "yellow", "green", "cyan", "blue", "magenta", "orange", "brown"]],
       ["Bright colours", ["bright_red", "bright_yellow", "bright_green", "bright_cyan", "bright_blue", "bright_magenta"]],

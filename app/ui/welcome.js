@@ -96,7 +96,7 @@ const welcome = {
       el("p", { class: "lead" }, `Palette found ${rows.length} app${rows.length === 1 ? "" : "s"} it can theme${todo.length ? `; ${todo.length} still need${todo.length === 1 ? "s" : ""} a line added to its settings` : ", all hooked up"}.`),
       el("div", { class: "found" }, ...rows.map((r) => el("span", { class: r.wired ? "wired" : "", title: r.wired ? "themed" : "not set up yet" }, label(r.name)))),
       btn,
-      el("p", { class: "note", style: { marginTop: "10px" } }, "Each app's file is backed up first. To keep an app on its own look, switch it off in Settings → Apps."),
+      el("p", { class: "note", style: { marginTop: "10px" } }, "Palette only edits configs, each backed up first; it never installs or runs anything. To keep an app on its own look, switch it off in Settings → Apps."),
     ];
   },
 

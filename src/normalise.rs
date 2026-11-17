@@ -513,6 +513,17 @@ pub const SYNTAX: [&str; 11] = [
     "magenta",
 ];
 
+/// The readability level a theme is used at: your setting, or Off for a theme you keep in
+/// its original colours.
+pub fn level_for(paths: &crate::paths::Paths, name: &str) -> Level {
+    let settings = crate::settings::load(paths).unwrap_or_default();
+    if settings.original_colours.contains(name) {
+        Level::Off
+    } else {
+        settings.readability
+    }
+}
+
 /// How visible an editor's selection must stay on its background (Minimal's selection
 /// minimum, with the usual slack).
 const EDITOR_SEL_VISIBLE: f32 = 1.3 * SLACK;
@@ -527,6 +538,10 @@ const EDITOR_SEL_VISIBLE: f32 = 1.3 * SLACK;
 /// failing that, to the most readable visible step. Towards the background means darker on
 /// dark themes and lighter on light ones, so light themes need no rule of their own.
 pub fn editor_selection(c: &Colors, level: Level) -> String {
+    // Set by the theme or by you (23b): used as it is, never moved.
+    if let Some(own) = c.get_opt("editor_selection") {
+        return own.to_string();
+    }
     selection_for(c, level, &SYNTAX)
 }
 

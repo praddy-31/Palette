@@ -99,7 +99,10 @@ fn user_theme_shadows_bundled_and_light_mode_file_works() {
     );
     fs::write(dir.join("light.mode"), "").unwrap();
     home.ok(&["set", "tokyo-night"]);
-    assert!(home.ok(&["list"]).contains("tokyo-night              user"));
+    assert!(
+        home.ok(&["list"])
+            .contains("tokyo-night              yours ")
+    );
     let sb = home.current_file("sketchybar.sh");
     assert!(sb.contains("ACCENT=0xff8ab2f9"), "{sb}");
     assert!(sb.contains("PALETTE_MODE=\"light\""), "{sb}");

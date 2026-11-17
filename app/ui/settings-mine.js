@@ -9,7 +9,12 @@ Object.assign(settings, {
     const favs = themes.filter((t) => t.favourite).length;
     $("#mine-count").textContent = `★ ${favs}/10 favourites · ${themes.length} themes`;
     // Favourites first, then the rest, each by name (sort keeps the order otherwise).
-    const list = themes.filter((t) => findTheme(t, q));
+    // Show: all, or one kind (17d): bundled = no installed/yours badge.
+    const kind = $("#mine-kind").value;
+    const ofKind = (t) => !kind || (kind === "bundled"
+      ? !(t.badges || []).some((b) => b === "installed" || b === "yours")
+      : (t.badges || []).includes(kind));
+    const list = themes.filter((t) => findTheme(t, q) && ofKind(t));
     list.sort((a, b) => (b.favourite - a.favourite) || 0);
     $("#mine").replaceChildren(...list.map((t) => this.mineRow(t)));
   },
@@ -27,16 +32,46 @@ Object.assign(settings, {
       class: "btn", disabled: !!t.invalid || t.current,
       onclick: () => this.mineApply(t.name, use),
     }, t.current ? "Active" : "Use");
+    // 17b: a name shown instead of the folder's; ✎ edits it in place.
+    const rename = el("button", {
+      class: "link mine-rename", disabled: !!t.invalid, title: "Show it by another name (the folder keeps its name)",
+      "aria-label": `Rename ${shownName(t)}`,
+      onclick: (e) => { e.stopPropagation(); this.mineRename(t, title); },
+    }, "✎");
+    const title = el("div", { class: "title" }, shownName(t), " ", rename, " ",
+          t.mode === "light" ? el("span", { class: "badge" }, "light") : null, " ",
+          ...(t.badges || []).flatMap((b) => [el("span", { class: "badge" }, b), " "]),
+          t.invalid ? el("span", { class: "badge warn" }, "can't load") : contrastBadge(t));
+    const walls = t.wallpapers ? `${t.wallpapers} wallpaper${t.wallpapers === 1 ? "" : "s"}` : "no wallpapers";
     return el("div", { class: `row${t.current ? " mine-current" : ""}`, title: t.invalid || "" },
       sw,
       el("div", {},
-        el("div", { class: "title" }, t.name, " ",
-          t.mode === "light" ? el("span", { class: "badge" }, "light") : null, " ",
-          t.origin === "user" ? el("span", { class: "badge" }, "yours") : null, " ",
-          t.invalid ? el("span", { class: "badge warn" }, "can't load") : contrastBadge(t)),
-        el("div", { class: "sub" }, t.wallpapers ? `${t.wallpapers} wallpaper${t.wallpapers === 1 ? "" : "s"}` : "no wallpapers"),
+        title,
+        el("div", { class: "sub" }, t.title ? `${t.name} · ${walls}` : walls),
         t.glass_wallpaper && !t.invalid ? this.mineGlass(t) : null),
       star, use);
+  },
+
+  /** Rename in place (17b): Enter saves, Esc cancels, empty gives the folder's name back. */
+  mineRename(t, title) {
+    const box = el("input", { class: "search mine-rename-box", type: "text", value: t.title || "",
+      placeholder: t.name, maxlength: 40, spellcheck: "false", "aria-label": `New name for ${t.name}` });
+    const save = async () => {
+      try {
+        const now = await invoke("rename_theme", { name: t.name, title: box.value.trim() || null });
+        toast(now === t.name ? `${t.name}: its own name again` : `${t.name} is now shown as ${now}`);
+      } catch (e) { toast(String(e), true); }
+      this.renderMine();
+    };
+    box.onkeydown = (e) => {
+      e.stopPropagation();
+      if (e.key === "Enter") save();
+      if (e.key === "Escape") this.renderMine();
+    };
+    box.onclick = (e) => e.stopPropagation();
+    title.replaceChildren(box);
+    box.focus();
+    box.select();
   },
 
   /** The glass slider (F2): how hard this theme's text is lifted on see-through windows.
@@ -112,4 +147,5 @@ Object.assign(settings, {
 });
 
 $("#mine-search").addEventListener("input", () => settings.renderMine());
+$("#mine-kind").addEventListener("change", () => settings.renderMine());
 $("#mine-search").parentElement.after(chipRow($("#mine-search"), () => settings.renderMine()));

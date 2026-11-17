@@ -7,7 +7,7 @@
  *  `palette::search::tags`: dark, warm, calm, blue…) or is part of its name (or `extra`,
  *  e.g. a catalogue title). The same rule as `palette list <words>`. */
 function findTheme(t, q, extra = "") {
-  const name = `${t.name} ${extra}`.toLowerCase();
+  const name = `${t.name} ${t.title || ""} ${extra}`.toLowerCase();
   return q.toLowerCase().split(/\s+/).filter(Boolean)
     .every((w) => name.includes(w) || (t.tags || []).some((x) => x.startsWith(w)));
 }

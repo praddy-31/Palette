@@ -1,6 +1,7 @@
 //! The menu bar icon and its native macOS menu (Phase 9c): the active theme, a Themes
 //! submenu (★ favourites, recent, all, the active one ticked), next/previous/undo, next
-//! wallpaper, the quick switcher, the picker, Performance mode, Settings, Quit.
+//! wallpaper, the quick switcher, the picker, a Bars submenu (saved bars, 18c), Performance
+//! mode, Settings, Quit.
 //!
 //! A native menu is an `NSMenu` inside the app process: no web page, no WebKit process,
 //! so it costs next to nothing. It is built again whenever the pointer enters the icon
@@ -31,6 +32,10 @@ pub struct MenuModel {
     pub recent: Vec<String>,
     pub all: Vec<String>,
     pub performance: bool,
+    /// Saved bars (name, in use); the submenu shows only when there are some.
+    pub bars: Vec<(String, bool)>,
+    /// Pinned apps (app, theme shown), ROADMAP 24; greyed out when there are none.
+    pub pins: Vec<(String, String)>,
 }
 
 impl MenuModel {
@@ -42,13 +47,23 @@ impl MenuModel {
         let all: Vec<String> = palette::theme::list(&paths)
             .map(|l| l.into_iter().map(|(name, _)| name).collect())
             .unwrap_or_default();
-        Self::from_parts(
+        let mut m = Self::from_parts(
             palette::state::current_theme(&paths).ok().flatten(),
             settings.favourites,
             palette::favourites::recents(&paths),
             all,
             settings.performance.on,
-        )
+        );
+        m.bars = palette::desktop::bar::saved::list(&paths)
+            .into_iter()
+            .map(|b| (b.name, b.in_use))
+            .collect();
+        m.pins = palette::pins(&paths)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|p| (p.app, palette::title(&paths, &p.theme)))
+            .collect();
+        m
     }
 
     /// Favourites and recents only if the theme still exists; recents without the
@@ -72,6 +87,8 @@ impl MenuModel {
             recent,
             all,
             performance,
+            bars: Vec::new(),
+            pins: Vec::new(),
         }
     }
 }
@@ -144,6 +161,25 @@ fn build_menu(app: &AppHandle, m: &MenuModel) -> tauri::Result<Menu<Wry>> {
         m.performance,
         None::<&str>,
     )?;
+    let bars = Submenu::with_id(app, "bars", "Bars", !m.bars.is_empty())?;
+    for (name, on) in &m.bars {
+        bars.append(&CheckMenuItem::with_id(
+            app,
+            format!("bar:{name}"),
+            name,
+            true,
+            *on,
+            None::<&str>,
+        )?)?;
+    }
+    // Shows the pins; a click opens Settings → Apps, where they are changed.
+    let pinned = Submenu::with_id(app, "pins", "Pinned Apps", !m.pins.is_empty())?;
+    for (app_name, theme) in &m.pins {
+        pinned.append(&item(
+            &format!("pin:{app_name}"),
+            &format!("{app_name} → {theme}"),
+        )?)?;
+    }
     let settings = item("settings", "Settings…")?;
     let quit = item("quit", "Quit Palette")?;
     let sep = || PredefinedMenuItem::separator(app);
@@ -160,6 +196,8 @@ fn build_menu(app: &AppHandle, m: &MenuModel) -> tauri::Result<Menu<Wry>> {
         &overlay,
         &open,
         &s3,
+        &bars,
+        &pinned,
         &performance,
         &settings,
         &s4,
@@ -197,6 +235,26 @@ fn on_menu(app: &AppHandle, id: &str) {
         spawn(async move {
             let _ = run_switch(app, Switch::To(name, None)).await;
         });
+        return;
+    }
+    if let Some(name) = id.strip_prefix("bar:") {
+        let (app, name) = (app.clone(), name.to_string());
+        spawn(async move {
+            let done = tauri::async_runtime::spawn_blocking(move || {
+                paths().map(|p| palette::desktop::bar::saved::use_bar(&p, &name))
+            })
+            .await;
+            if let Ok(Ok(Err(e))) = done {
+                eprintln!("palette: bar: {e:#}");
+            }
+            refresh(&app);
+            crate::beats::sync_soon();
+            let _ = app.emit("bar-changed", ());
+        });
+        return;
+    }
+    if id.starts_with("pin:") {
+        crate::sync::open_settings_tab(app.clone(), "apps".into());
         return;
     }
     match id {

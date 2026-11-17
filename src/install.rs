@@ -40,7 +40,7 @@ pub struct Installed {
 
 /// `palette install <catalogue name | github url | folder>`.
 pub fn install(paths: &Paths, source: &str, name: Option<&str>) -> Result<Installed> {
-    let url = resolve(source);
+    let url = resolve(paths, source);
     let name = match name {
         Some(n) => n.to_string(),
         None => slug(&url),
@@ -195,12 +195,35 @@ pub fn move_to_trash(paths: &Paths, from: &Path) -> Result<PathBuf> {
 
 // ---------------------------------------------------------------- sources
 
-/// A catalogue name becomes its repo URL; anything else is used as given.
-fn resolve(source: &str) -> String {
-    match crate::catalog::find(source) {
-        Some(entry) => entry.url.clone(),
-        None => source.trim().trim_end_matches('/').to_string(),
+/// A catalogue name becomes its repo URL, a Rex theme's name `rex:<id>`; anything else
+/// is used as given.
+fn resolve(paths: &Paths, source: &str) -> String {
+    if let Some(entry) = crate::catalog::find(source) {
+        return entry.url.clone();
     }
+    let source = source.trim().trim_end_matches('/');
+    if crate::catalog::rex_raw(paths)
+        .iter()
+        .any(|(id, ..)| id == source)
+    {
+        return format!("rex:{source}");
+    }
+    source.to_string()
+}
+
+/// `palette install rex`: every theme that comes with the Rex app, except those already
+/// installed (or whose names are taken). Returns what was installed.
+pub fn install_rex(paths: &Paths) -> Result<Vec<Installed>> {
+    let raw = crate::catalog::rex_raw(paths);
+    if raw.is_empty() {
+        bail!("Rex isn't installed (its themes come from the app)");
+    }
+    let taken: Vec<String> = theme::list(paths)?.into_iter().map(|(n, _)| n).collect();
+    let mut done = Vec::new();
+    for (id, ..) in raw.iter().filter(|(id, ..)| !taken.contains(id)) {
+        done.push(install(paths, &format!("rex:{id}"), Some(id))?);
+    }
+    Ok(done)
 }
 
 /// `https://github.com/someone/omarchy-aura-theme` → `aura`.
@@ -242,6 +265,9 @@ impl Drop for Fetched {
 
 impl Fetched {
     fn get(paths: &Paths, url: &str) -> Result<Fetched> {
+        if let Some(id) = url.strip_prefix("rex:") {
+            return Self::rex(paths, id);
+        }
         let local = Path::new(url.strip_prefix("file://").unwrap_or(url));
         if local.is_dir() {
             return Ok(Fetched {
@@ -305,6 +331,32 @@ impl Fetched {
             bail!(
                 "`{url}` isn't a theme name from `palette catalog`, an https:// link or a folder"
             );
+        }
+        Ok(fetched)
+    }
+}
+
+impl Fetched {
+    /// A Rex theme: its colours, read from the installed app, as a `colors.toml` in a
+    /// temporary folder (no network). `light.mode` for light ones.
+    fn rex(paths: &Paths, id: &str) -> Result<Fetched> {
+        let (_, _, table, light) = crate::catalog::rex_raw(paths)
+            .into_iter()
+            .find(|(i, ..)| i == id)
+            .with_context(|| format!("Rex has no theme `{id}` (or Rex isn't installed)"))?;
+        let temp = paths
+            .root()
+            .join("cache")
+            .join(format!("install-{}", millis()));
+        let dir = temp.join("theme");
+        fs::create_dir_all(&dir)?;
+        let fetched = Fetched {
+            dir: dir.clone(),
+            temp: Some(temp),
+        };
+        fs::write(dir.join("colors.toml"), toml::to_string(&table)?)?;
+        if light {
+            fs::write(dir.join("light.mode"), "")?;
         }
         Ok(fetched)
     }
@@ -466,6 +518,11 @@ struct Source {
     files: BTreeSet<String>,
 }
 
+/// Was the theme in `dir` downloaded (`palette install`, Get themes, a link)?
+pub fn is_downloaded(dir: &Path) -> bool {
+    dir.join(SOURCE_FILE).is_file()
+}
+
 fn read_source(dir: &Path) -> Result<Source> {
     let text = fs::read_to_string(dir.join(SOURCE_FILE))?;
     let table: toml::Table = text.parse()?;
@@ -602,6 +659,17 @@ pub fn complete(table: &toml::Table, light: bool) -> Result<(String, Vec<String>
     fill(&mut v, "dark_foreground", mix(&bg, &fg, 0.6));
     fill(&mut v, "light_foreground", mix(&fg, &bg, 0.15));
     fill(&mut v, "bright_foreground", mix(&fg, raised, 0.25));
+    // A selection as bright as the text (snow-black's white on white text, 23b): the theme
+    // meant inverted selected text, which Palette can't give every app (they draw the text
+    // in the brightest text colour). A grey between background and text instead.
+    let mut guessed = Vec::new();
+    let like_text = ["foreground", "bright_foreground"]
+        .iter()
+        .any(|k| crate::colour::contrast(&v[*k], &v["selection"]) < 1.5);
+    if like_text {
+        v.insert("selection", mix(&bg, &fg, 0.3));
+        guessed.push("selection");
+    }
     for key in base {
         let bright: &'static str = match key {
             "red" => "bright_red",
@@ -624,6 +692,8 @@ pub fn complete(table: &toml::Table, light: bool) -> Result<(String, Vec<String>
         if let Some(value) = v.get(*key) {
             let note = if filled.iter().any(|f| f == key) {
                 "  # filled"
+            } else if guessed.contains(key) {
+                "  # guessed: the theme's selection was as bright as its text"
             } else {
                 ""
             };
@@ -666,6 +736,34 @@ fn from_alacritty(text: &str) -> Result<toml::Table> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_selection_like_the_text_becomes_a_grey() {
+        // snow-black: white selection, white text.
+        let mut t = toml::Table::new();
+        for (k, h) in [
+            ("background", "#000000"),
+            ("foreground", "#ffffff"),
+            ("selection", "#ffffff"),
+            ("red", "#5f8787"),
+            ("yellow", "#a06666"),
+            ("green", "#dd9999"),
+            ("cyan", "#aaaaaa"),
+            ("blue", "#888888"),
+            ("magenta", "#999999"),
+        ] {
+            t.insert(k.into(), h.into());
+        }
+        let (text, _) = complete(&t, false).unwrap();
+        assert!(
+            text.contains("selection = \"#4d4d4d\"  # guessed"),
+            "{text}"
+        );
+        // A normal selection stays.
+        t.insert("selection".into(), "#333333".into());
+        let (text, _) = complete(&t, false).unwrap();
+        assert!(text.contains("selection = \"#333333\"\n"), "{text}");
+    }
 
     #[test]
     fn slugs() {

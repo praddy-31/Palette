@@ -7,7 +7,7 @@ sketchybar --add item palette_gap right \
   --set palette_gap width=6 padding_left=0 padding_right=0 icon.drawing=off label.drawing=off \
   --add item palette right \
   --set palette icon="$PALETTE_ICON" icon.color=$ACCENT icon.padding_left=12 \
-    label="{{ theme }}" label.padding_right=12 \
+    label="{{ title }}" label.padding_right=12 \
     click_script="open -g palette://click" \
 {%- if bar_scroll %}
     script='[ "$SENDER" = mouse.scrolled ] || exit 0; if [ "${SCROLL_DELTA:-0}" -gt 0 ]; then open -g palette://prev; else open -g palette://next; fi' \

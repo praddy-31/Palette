@@ -13,3 +13,15 @@ cargo build --release -p palette
 triple=$(rustc -vV | sed -n 's/^host: //p')
 mkdir -p app/binaries
 cp target/release/palette "app/binaries/palette-cli-$triple"
+
+# The beat lines' helper (ROADMAP 20): Swift, macOS only, copied into Contents/MacOS by
+# tauri.conf.json's bundle.macOS.files. 14.2 is the first macOS with audio process taps; signed
+# ad hoc here, so the app's own signature seals a signed binary.
+if [ "$(uname)" = Darwin ]; then
+  swiftc -O -target "$(uname -m)-apple-macos14.2" app/helpers/palette-beats.swift -o app/binaries/palette-beats
+  codesign -s - -f app/binaries/palette-beats
+  # Play/pause for the now-playing item, loaded by /usr/bin/perl (app/helpers/palette-media.m).
+  clang -dynamiclib -fobjc-arc -framework Foundation -Wno-objc-method-access -mmacosx-version-min=13.0 \
+    app/helpers/palette-media.m -o app/binaries/libpalette-media.dylib
+  codesign -s - -f app/binaries/libpalette-media.dylib
+fi

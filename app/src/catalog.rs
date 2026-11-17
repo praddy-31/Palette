@@ -26,8 +26,11 @@ pub(crate) fn catalog() -> Result<Vec<CatalogItem>, AppError> {
         .into_iter()
         .map(|(n, _)| n)
         .collect();
+    // Themes that come with the Rex app on this Mac, after the community's (21c).
+    let rex = palette::catalog::rex_entries(&paths);
     Ok(palette::catalog::entries()
         .iter()
+        .chain(&rex)
         .map(|e| CatalogItem {
             name: e.name.clone(),
             title: e.title.clone(),

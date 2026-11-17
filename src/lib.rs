@@ -7,11 +7,14 @@ pub mod doctor;
 pub mod edits;
 pub mod effects;
 pub mod fetch;
+pub mod font;
 pub mod glass;
 pub mod install;
+pub mod jsonc;
 pub mod launcher;
 pub mod library;
 pub mod log;
+pub mod missing;
 pub mod monochrome;
 pub mod normalise;
 pub mod paths;
@@ -32,6 +35,7 @@ pub mod targets;
 pub mod theme;
 pub mod thumbs;
 pub mod tools;
+pub mod verify;
 pub mod wiring;
 // Added in the "next five" round (kept together to ease merges).
 pub mod check;
@@ -85,12 +89,204 @@ pub fn switch_with_wallpaper(
     result
 }
 
+/// The theme a name means: a theme's folder name as it is, else a display name (`palette
+/// rename`, any case), else the name unchanged (so the error says it doesn't exist).
+pub fn resolve(paths: &Paths, name: &str) -> String {
+    if paths.themes().join(name).is_dir() || theme::is_bundled(name) {
+        return name.to_string();
+    }
+    let wanted = name.trim().to_lowercase();
+    settings::load(paths)
+        .unwrap_or_default()
+        .names
+        .into_iter()
+        .find(|(_, shown)| shown.to_lowercase() == wanted)
+        .map_or_else(|| name.to_string(), |(theme, _)| theme)
+}
+
+/// The name a theme is shown by: its display name if it has one, else its folder name.
+pub fn title(paths: &Paths, theme: &str) -> String {
+    settings::load(paths)
+        .ok()
+        .and_then(|s| s.names.get(theme).cloned())
+        .unwrap_or_else(|| theme.to_string())
+}
+
+/// `palette rename <theme> <name>` (ROADMAP 17b): a name shown instead of the folder's
+/// (picker, quick switcher, bar pill, toast, `palette list`); `palette set` takes either.
+/// `None` (or the folder name itself) gives the folder name back. Returns the name shown now.
+pub fn rename(paths: &Paths, theme: &str, shown: Option<&str>) -> Result<String> {
+    let _lock = lock::exclusive(paths)?;
+    let names: Vec<String> = theme::list(paths)?.into_iter().map(|(n, _)| n).collect();
+    if !names.iter().any(|n| n == theme) {
+        bail!(crate::problem::Problem::NoSuchTheme { name: theme.into() });
+    }
+    let mut s = settings::load(paths)?;
+    let shown = shown
+        .map(str::trim)
+        .filter(|n| !n.is_empty() && *n != theme);
+    if let Some(n) = shown {
+        if n.chars().count() > 40 {
+            bail!("a name is at most 40 characters");
+        }
+        // The bar pill writes it inside shell quotes, so no quote, backslash, $ or backtick.
+        if n.chars()
+            .any(|c| c.is_control() || matches!(c, '"' | '\\' | '$' | '`'))
+        {
+            bail!("a name can't have \" \\ $ ` or line breaks");
+        }
+        let lower = n.to_lowercase();
+        if names
+            .iter()
+            .any(|other| other != theme && other.to_lowercase() == lower)
+        {
+            bail!("`{n}` is another theme's name");
+        }
+        if let Some((other, _)) = s
+            .names
+            .iter()
+            .find(|(other, v)| *other != theme && v.to_lowercase() == lower)
+        {
+            bail!("`{n}` is already {other}'s name");
+        }
+    }
+    let before = s.names.get(theme).cloned();
+    match shown {
+        Some(n) => s.names.insert(theme.to_string(), n.to_string()),
+        None => s.names.remove(theme),
+    };
+    if s.names.get(theme) != before.as_ref() {
+        settings::save(paths, &s)?;
+        drop(_lock);
+        // The bar's theme pill shows the name: only its file, if this is the active theme.
+        if state::current_theme(paths)?.as_deref() == Some(theme) {
+            rerender(paths, Some(&["sketchybar-item"]))?;
+        }
+    }
+    Ok(shown.unwrap_or(theme).to_string())
+}
+
+/// Herdr's frost, one switch that lasts (owner, 2026-11-17; `targets/herdr_app/frost.rs`):
+/// on, Herdr shows Palette's frosted copy of your layout (`window_blur`) from now on, across
+/// restarts; the glass is set to Clear if it isn't, as the blur only shows through see-through
+/// colours. Off, Herdr goes back to your layout and the copy to the Bin. Needs Herdr open.
+pub fn herdr_frost(paths: &Paths, on: bool) -> Result<String> {
+    if on && settings::load(paths)?.glass_saved("herdr-app").kind != settings::TermGlass::Clear {
+        glass(
+            paths,
+            "herdr-app",
+            Some(settings::TermGlass::Clear),
+            None,
+            None,
+        )?;
+    }
+    let _lock = lock::exclusive(paths)?;
+    let mut s = settings::load(paths)?;
+    if on {
+        let from = targets::herdr_app::frost_on(paths, s.herdr_frost.as_deref())?;
+        s.herdr_frost = Some(from.clone());
+        settings::save(paths, &s)?;
+        Ok(format!(
+            "Herdr uses a frosted copy of your `{from}` layout from now on (layouts/palette-glass.json)"
+        ))
+    } else {
+        let from = s.herdr_frost.clone().unwrap_or_else(|| "main".into());
+        targets::herdr_app::frost_off(paths, &from)?;
+        s.herdr_frost = None;
+        settings::save(paths, &s)?;
+        Ok(format!("Herdr is back on your `{from}` layout"))
+    }
+}
+
+/// Is Herdr showing Palette's frosted copy now?
+pub fn herdr_frost_on(paths: &Paths) -> bool {
+    targets::herdr_app::frost_is_on(paths)
+}
+
+/// One pinned app (ROADMAP 24): the app keeps `theme` whatever the main theme is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Pin {
+    pub app: String,
+    pub theme: String,
+    /// The theme folder is gone: the app follows the main theme until the pin is cleared.
+    pub missing: bool,
+}
+
+/// Every pin, by app.
+pub fn pins(paths: &Paths) -> Result<Vec<Pin>> {
+    let names: Vec<String> = theme::list(paths)?.into_iter().map(|(n, _)| n).collect();
+    Ok(settings::load(paths)?
+        .pins
+        .into_iter()
+        .map(|(app, theme)| Pin {
+            missing: !names.contains(&theme),
+            app,
+            theme,
+        })
+        .collect())
+}
+
+/// Pin `app` to `theme` (`palette pin ghostty tokyo-night`), or (`None`) let it follow the
+/// main theme again. Any app with a file can be pinned, the bar and borders too; light/dark
+/// and the wallpaper always follow the main theme. Re-renders only that app, in place (no
+/// Undo step), like a glass setting. Returns the re-render, `None` when nothing changed or
+/// no theme is active yet.
+pub fn pin(paths: &Paths, app: &str, theme_name: Option<&str>) -> Result<Option<Switch>> {
+    let Some(target) = targets::get(app) else {
+        bail!("no app called {app}: see `palette apps`");
+    };
+    if target.output.is_none() {
+        bail!("{app} has no colours of its own to pin");
+    }
+    let theme_name = theme_name.map(|t| resolve(paths, t));
+    if let Some(t) = &theme_name
+        && !theme::list(paths)?.iter().any(|(n, _)| n == t)
+    {
+        bail!(crate::problem::Problem::NoSuchTheme { name: t.clone() });
+    }
+    let mut s = settings::load(paths)?;
+    let before = s.pins.get(app).cloned();
+    match &theme_name {
+        Some(t) => s.pins.insert(app.to_string(), t.clone()),
+        None => s.pins.remove(app),
+    };
+    if s.pins.get(app) == before.as_ref() {
+        return Ok(None);
+    }
+    settings::save(paths, &s)?;
+    rerender(paths, Some(&[target.name]))
+}
+
+/// After a theme is removed: the apps pinned to it follow the main theme again (re-rendered
+/// in place). Returns those apps, for the message.
+pub fn unpin_theme(paths: &Paths, theme_name: &str) -> Result<Vec<String>> {
+    let mut s = settings::load(paths)?;
+    let apps: Vec<String> = s
+        .pins
+        .iter()
+        .filter(|(_, t)| *t == theme_name)
+        .map(|(a, _)| a.clone())
+        .collect();
+    if apps.is_empty() {
+        return Ok(apps);
+    }
+    s.pins.retain(|_, t| t != theme_name);
+    settings::save(paths, &s)?;
+    let names: Vec<&str> = apps
+        .iter()
+        .filter_map(|a| targets::get(a).map(|t| t.name))
+        .collect();
+    rerender(paths, Some(&names))?;
+    Ok(apps)
+}
+
 fn switch_inner(
     paths: &Paths,
     name: &str,
     wallpaper: Option<&str>,
     dry_run: bool,
 ) -> Result<Switch> {
+    let name = &resolve(paths, name);
     let _lock = if dry_run {
         None
     } else {
@@ -234,10 +430,27 @@ pub fn render_output(paths: &Paths, file: &str) -> Result<()> {
 /// Palette copies, starship.toml say) and reload **every** app, for one that missed a change.
 /// In place, like [`rerender`]: no Undo step.
 pub fn refresh(paths: &Paths) -> Result<Switch> {
-    match rerender_with(paths, None, true)? {
-        Some(s) => Ok(s),
+    let mut switch = match rerender_with(paths, None, true)? {
+        Some(s) => s,
         None => bail!(problem::Problem::NoThemeYet),
+    };
+    if let Some(effect) = bar_scripts_effect(paths) {
+        switch.effects.push(effect);
     }
+    Ok(switch)
+}
+
+/// The bar's pill scripts brought up to this version (ROADMAP 28), as a line for the report:
+/// `None` when none needed it (or the bar isn't Palette's).
+pub fn bar_scripts_effect(paths: &Paths) -> Option<effects::Effect> {
+    let outcome = match desktop::bar::update_scripts(paths) {
+        Ok(names) if names.is_empty() => return None,
+        Ok(names) => {
+            system::Outcome::Done(format!("updated to this version: {}", names.join(", ")))
+        }
+        Err(e) => system::Outcome::Failed(format!("{e:#}")),
+    };
+    Some(("bar scripts".into(), outcome))
 }
 
 /// After a setting changed (glass, Zed, Obsidian, monochrome, readability, colour edits): render
@@ -441,7 +654,15 @@ pub fn glass(
     if let Some(k) = kind
         && !settings::TermGlass::kinds(app).contains(&k)
     {
-        bail!("{} is Ghostty only (macOS 26's own glass)", k.as_str());
+        let offered: Vec<&str> = settings::TermGlass::kinds(app)
+            .iter()
+            .map(|k| k.as_str())
+            .collect();
+        bail!(
+            "{app} has no {} glass (it offers {})",
+            k.as_str(),
+            offered.join(", ")
+        );
     }
     let _lock = lock::exclusive(paths)?;
     let mut s = settings::load(paths)?;
@@ -455,6 +676,50 @@ pub fn glass(
         s.glass.insert(app.to_string(), now);
         settings::save(paths, &s)?;
         if state::current_theme(paths)?.is_some() {
+            rerender(paths, Some(&[app]))?;
+        }
+    }
+    Ok(now)
+}
+
+/// `palette font <app>`: an app's font size and family (22b). `None` leaves that part,
+/// `Some(None)` gives it back to your own setting. Terminals: saved, then the active theme is
+/// rendered again so Palette's file for that app carries the lines. Editors (Zed, VSCodium):
+/// one key in their settings.json, your value kept to put back. Returns the font as now set.
+pub fn font(
+    paths: &Paths,
+    app: &str,
+    size: Option<Option<f32>>,
+    family: Option<Option<String>>,
+) -> Result<settings::AppFont> {
+    if !settings::FONT_APPS.contains(&app) {
+        bail!("fonts are for {}", settings::FONT_APPS.join(", "));
+    }
+    let size = size
+        .map(|s| s.map(settings::font_size).transpose())
+        .transpose()?;
+    let family = family.map(|f| f.map(|f| f.trim().to_string()));
+    if let Some(Some(f)) = &family {
+        font::check_family(f)?;
+    }
+    let _lock = lock::exclusive(paths)?;
+    let mut s = settings::load(paths)?;
+    let before = s.fonts.get(app).cloned().unwrap_or_default();
+    let now = settings::AppFont {
+        size: size.unwrap_or(before.size),
+        family: family.unwrap_or_else(|| before.family.clone()),
+    };
+    if now != before {
+        if now.is_empty() {
+            s.fonts.remove(app);
+        } else {
+            s.fonts.insert(app.to_string(), now.clone());
+        }
+        settings::save(paths, &s)?;
+        if font::is_editor(app) {
+            // Both editors watch their settings.json, so the change shows by itself.
+            font::apply_editor(paths, app, &now)?;
+        } else if state::current_theme(paths)?.is_some() {
             rerender(paths, Some(&[app]))?;
         }
     }
@@ -496,6 +761,20 @@ pub fn set_close_idle_settings(paths: &Paths, on: Option<bool>) -> Result<bool> 
         settings::save(paths, &s)?;
     }
     Ok(s.close_idle_settings)
+}
+
+/// `palette ui --reopen picker|settings|quick-switcher`: what opening Palette again shows
+/// while it runs (17c). `None` leaves it; returns it as it is now.
+pub fn set_reopen(paths: &Paths, reopen: Option<settings::Reopen>) -> Result<settings::Reopen> {
+    let _lock = lock::exclusive(paths)?;
+    let mut s = settings::load(paths)?;
+    if let Some(r) = reopen
+        && r != s.reopen
+    {
+        s.reopen = r;
+        settings::save(paths, &s)?;
+    }
+    Ok(s.reopen)
 }
 
 /// `palette log [on|off]`: one line per switch in `palette.log`. `None` leaves it; returns
@@ -619,6 +898,46 @@ pub struct SystemInfo {
     /// For people: "macOS", "GNOME", "niri + Noctalia".
     pub label: String,
 }
+
+/// Apps that take a new theme only while they run (through their own CLI), by the name macOS
+/// gives them when they start, and their target. A switch made while one was closed leaves it
+/// with the older theme until it is told again: [`catch_up`].
+pub const TOLD_WHILE_RUNNING: [(&str, &str); 3] =
+    [("Orca", "orca"), ("Rex", "rex"), ("Rex Beta", "rex")];
+
+/// `app` (macOS's name for it) has just started: if it is one of [`TOLD_WHILE_RUNNING`], on
+/// and wired, and holds an older theme than the current one (its `palette verify` read-back
+/// fails), send it the current one. An app that has just started may not answer yet, so this
+/// tries for up to `tries` × `wait`. `None` when there was nothing to do.
+pub fn catch_up(
+    paths: &Paths,
+    app: &str,
+    tries: u32,
+    wait: std::time::Duration,
+) -> Option<Outcome> {
+    let (_, name) = TOLD_WHILE_RUNNING.iter().find(|(a, _)| *a == app)?;
+    let target = targets::get(name)?;
+    let mut last = None;
+    for attempt in 0..tries.max(1) {
+        if attempt > 0 {
+            std::thread::sleep(wait);
+        }
+        // Off, not wired, no theme yet: the read-back has no row, nothing to catch up.
+        let row = verify::run(paths, Some(name)).ok()?.into_iter().next()?;
+        match row.outcome {
+            Outcome::Done(_) | Outcome::Unchanged(_) => return last,
+            Outcome::Skipped(ref why) if why == effects::OFF || why.starts_with("not wired") => {
+                return None;
+            }
+            // Behind, or not answering yet ("not running" while it starts up): send it again.
+            _ => last = Some((target.reload)(paths)),
+        }
+    }
+    last
+}
+
+/// Palette's version, as `palette --version` prints it (Settings → General shows it too).
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub fn system_info() -> SystemInfo {
     let session = system::session::Session::detect();
@@ -766,7 +1085,11 @@ pub fn set_app(paths: &Paths, name: &str, on: bool) -> Result<(wiring::Report, V
         rewrite_managed(paths, &report)?;
     }
     let mut effects = Vec::new();
-    if !paths.is_fake() && report.items.iter().any(|i| i.step.writes()) {
+    // An app Palette sets with a command (`Wiring::Direct`: Rex, Konsole) has no config
+    // line to write, so nothing in the report says it changed: run it anyway, so switching
+    // it off gives the app's own look back and switching it on applies the theme.
+    let direct = matches!(target.wiring, wiring::Wiring::Direct);
+    if !paths.is_fake() && (direct || report.items.iter().any(|i| i.step.writes())) {
         let outcome = match (on, target.unload) {
             (false, Some(unload)) => unload(paths),
             _ => (target.reload)(paths),
@@ -779,6 +1102,34 @@ pub fn set_app(paths: &Paths, name: &str, on: bool) -> Result<(wiring::Report, V
 /// `palette import <dir>`: copy an export onto this Mac (backing up what it
 /// replaces), then switch to the exported theme and wire any app that
 /// isn't yet. A dry run only reports.
+/// The apps an import brought configs for that aren't on this Mac, with the brew commands to
+/// copy (25a). Palette runs none of them.
+pub fn import_needs(paths: &Paths, report: &sync::ImportReport) -> Vec<missing::Missing> {
+    missing::missing(&report.written, |id| missing::installed(paths, id))
+}
+
+/// 25b: apps an import was waiting for that are installed now (popup / Settings row).
+pub fn arrived(paths: &Paths) -> Vec<missing::Arrived> {
+    missing::arrived_with(paths, |id| missing::installed(paths, id))
+}
+
+/// 25b "Use it": switch the app on in Palette, which adds Palette's line to the imported
+/// config (backup first) and reloads it, then stop asking. Runs no other program; starting
+/// SketchyBar or JankyBorders stays the person's `brew services start`.
+pub fn use_arrived(paths: &Paths, id: &str) -> Result<Vec<Effect>> {
+    let mut effects = set_app(paths, id, true)?.1;
+    if id == "sketchybar" && targets::get("sketchybar-item").is_some() {
+        effects.extend(set_app(paths, "sketchybar-item", true)?.1);
+    }
+    missing::answer(paths, id, false)?;
+    Ok(effects)
+}
+
+/// 25b "Not now": no popup again; the row in Settings → Apps stays.
+pub fn later_arrived(paths: &Paths, id: &str) -> Result<()> {
+    missing::answer(paths, id, true)
+}
+
 pub fn import(
     paths: &Paths,
     dir: &std::path::Path,
@@ -793,6 +1144,8 @@ pub fn import(
     if dry_run {
         return Ok((report, None, Vec::new()));
     }
+    // 25b: offer to set these up once they're installed.
+    missing::remember(paths, &import_needs(paths, &report))?;
     let mut effects = Vec::new();
     if let Some(theme) = &report.theme
         && theme::load(paths, theme).is_ok()

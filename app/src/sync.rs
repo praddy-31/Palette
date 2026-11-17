@@ -9,6 +9,9 @@ pub(crate) struct ImportPlan {
     pub(crate) replaced: Vec<String>,
     pub(crate) theme: Option<String>,
     pub(crate) apps: Vec<&'static str>,
+    /// Apps the configs need that aren't on this Mac (25a), and the brew commands as one block.
+    pub(crate) missing: Vec<palette::missing::Missing>,
+    pub(crate) script: Vec<String>,
 }
 
 /// Pick an export folder and describe what importing it would change
@@ -27,6 +30,7 @@ pub(crate) async fn import_dialog(app: AppHandle) -> Result<Option<ImportPlan>, 
     tauri::async_runtime::spawn_blocking(move || {
         let paths = paths()?;
         let (report, _, _) = palette::import(&paths, &dir, true).map_err(err)?;
+        let missing = palette::import_needs(&paths, &report);
         Ok(Some(ImportPlan {
             dir: dir.display().to_string(),
             files: report.written.len(),
@@ -38,6 +42,8 @@ pub(crate) async fn import_dialog(app: AppHandle) -> Result<Option<ImportPlan>, 
                 .collect(),
             theme: report.theme.clone(),
             apps: palette::sync::imported_apps(&report),
+            script: palette::missing::script(&missing),
+            missing,
         }))
     })
     .await
@@ -138,4 +144,33 @@ pub(crate) async fn export_dialog(
     })
     .await
     .map_err(err)?
+}
+
+/// 25b: apps an import was waiting for that are installed now.
+#[tauri::command]
+pub(crate) fn arrived() -> Result<Vec<palette::missing::Arrived>, AppError> {
+    Ok(palette::arrived(&paths()?))
+}
+
+/// 25b: "Use it" (Palette's line in the imported config, then reload) or "Not now".
+#[tauri::command]
+pub(crate) async fn answer_arrived(
+    app: AppHandle,
+    id: String,
+    use_it: bool,
+) -> Result<Vec<String>, AppError> {
+    let problems = tauri::async_runtime::spawn_blocking(move || {
+        let paths = paths()?;
+        if use_it {
+            let effects = palette::use_arrived(&paths, &id).map_err(err)?;
+            Ok::<_, AppError>(applied(id, &effects).problems)
+        } else {
+            palette::later_arrived(&paths, &id).map_err(err)?;
+            Ok(Vec::new())
+        }
+    })
+    .await
+    .map_err(err)??;
+    let _ = app.emit("theme-changed", ());
+    Ok(problems)
 }

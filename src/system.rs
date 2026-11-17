@@ -112,18 +112,58 @@ pub fn find_program(name: &str) -> Option<PathBuf> {
 /// scrambles the bar (items between other pills, missing icons). So a reload waits until
 /// [`SKETCHYBAR_GAP`] has passed since the last one this process sent.
 pub fn reload_sketchybar() -> Result<String, String> {
+    after_last_reload(|| run("sketchybar", &["--reload"]), true)
+}
+
+/// A colour-only batch for a running bar (ROADMAP 15a: a switch without `--reload`). It
+/// waits for a reload still running, as a `--set` during one lands between its `--add`s.
+pub fn recolour_sketchybar(script: &str) -> Result<String, String> {
+    after_last_reload(|| run("bash", &["-c", script]), false)
+}
+
+/// One SketchyBar change at a time in this process; `reload` starts a new gap.
+fn after_last_reload(
+    f: impl FnOnce() -> Result<String, String>,
+    reload: bool,
+) -> Result<String, String> {
     static LAST: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
     let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(wait) = last.and_then(|t| SKETCHYBAR_GAP.checked_sub(t.elapsed())) {
         std::thread::sleep(wait);
     }
-    let out = run("sketchybar", &["--reload"]);
-    *last = Some(std::time::Instant::now());
+    let out = f();
+    if reload {
+        *last = Some(std::time::Instant::now());
+    }
     out
 }
 
 /// Time a sketchybarrc needs to finish (the owner's, about 60 commands, takes well under this).
 pub const SKETCHYBAR_GAP: std::time::Duration = std::time::Duration::from_millis(2500);
+
+/// A file inside Palette's app bundle (`Contents/…`): the bundle the running program is in (the app,
+/// or its CLI), else the app in /Applications or ~/Applications.
+pub fn palette_app_file(rel: &str) -> Option<PathBuf> {
+    let mut bundles = Vec::new();
+    if let Ok(exe) = std::env::current_exe().and_then(|e| e.canonicalize()) {
+        // …/Palette.app/Contents/MacOS/palette-cli → …/Palette.app
+        if let Some(app) = exe
+            .ancestors()
+            .nth(3)
+            .filter(|a| a.extension().is_some_and(|x| x == "app"))
+        {
+            bundles.push(app.to_path_buf());
+        }
+    }
+    bundles.push(PathBuf::from("/Applications/Palette.app"));
+    if let Some(home) = std::env::var_os("HOME") {
+        bundles.push(PathBuf::from(home).join("Applications/Palette.app"));
+    }
+    bundles
+        .into_iter()
+        .map(|b| b.join(rel))
+        .find(|p| p.is_file())
+}
 
 /// Run a program, turning a non-zero exit into an error message.
 pub fn run(program: &str, args: &[&str]) -> Result<String, String> {

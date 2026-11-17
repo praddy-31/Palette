@@ -50,15 +50,21 @@ fn cr(a: &str, b: &str) -> f32 {
 pub fn pool(c: &Colors) -> Vec<String> {
     let mut seen = BTreeSet::new();
     c.iter()
+        .filter(|(k, _)| !crate::theme::OWN_KEYS.contains(k))
         .map(|(_, v)| v.to_string())
         .filter(|v| seen.insert(v.clone()))
         .collect()
 }
 
-/// Grey-ish, or tinted like the background: fit for shades and quiet text.
+/// Grey-ish, or tinted like the background: fit for shades and quiet text. A grey or black
+/// background has no hue to match (its hue angle is noise), so only greys are neutral there:
+/// snow-black's reddish `#a06666` once passed as "tinted like black" and became secondary text.
 fn neutral(hex: &str, bg: &str) -> bool {
     let (x, b) = (Lch::from_hex(hex), Lch::from_hex(bg));
     let hue_gap = ((x.h - b.h).abs() % 360.0).min(360.0 - (x.h - b.h).abs() % 360.0);
+    if b.c < 0.02 {
+        return x.c < 0.03;
+    }
     x.c < 0.05 || (x.c < 0.11 && hue_gap < 30.0)
 }
 
@@ -444,5 +450,12 @@ mod tests {
         let changes = rank(&mut c, &keep, Roles::Named);
         assert_eq!(c.get("bright_foreground"), bright);
         assert!(changes.iter().all(|ch| ch.key != "bright_foreground"));
+    }
+
+    #[test]
+    fn a_black_background_has_no_tint_so_red_is_not_secondary_text() {
+        assert!(!neutral("#a06666", "#000000"));
+        assert!(!neutral("#5f8787", "#000000"));
+        assert!(neutral("#999999", "#000000"));
     }
 }

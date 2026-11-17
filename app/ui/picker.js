@@ -3,13 +3,19 @@
 
 // ---------------------------------------------------------------- picker
 
+/** An app's name for people: `herdr-app` → Herdr-app, `vscodium` → Vscodium. */
+const appName = (id) => id.charAt(0).toUpperCase() + id.slice(1);
+
 const picker = {
   busy: false,
   recent: [],
+  pins: [],
 
   async open() {
     await load();
+    offerArrived();
     this.recent = await invoke("recents").catch(() => []);
+    this.pins = await invoke("pins").catch(() => []);
     $("#search").value = "";
     $("#search").focus();
     this.render();
@@ -25,6 +31,14 @@ const picker = {
     $("#now").textContent = cur ? cur.name : "no theme yet";
     const grid = $("#grid");
     grid.replaceChildren();
+    // Pinned apps (ROADMAP 24): shown here, changed in Settings → Apps (a click opens it).
+    const pins = this.pins.filter((p) => !p.missing);
+    if (!q && pins.length) {
+      grid.append(el("div", { class: "pins" }, ...pins.map((p) => el("button", {
+        class: "chip", title: `${appName(p.app)} keeps ${p.title}: change it in Settings → Apps`,
+        onclick: async () => { await invoke("open_settings_tab", { tab: "apps" }); invoke("hide"); },
+      }, `📌 ${appName(p.app)} → `, el("b", {}, p.title)))));
+    }
     if (!q) {
       // Favourites and recent themes first, each as one scrolling row.
       const byName = new Map(themes.map((t) => [t.name, t]));
@@ -59,18 +73,21 @@ const picker = {
     }
     const card = el("button", {
       class: `card${t.current ? " current" : ""}${t.invalid ? " invalid" : ""}`,
-      title: t.invalid || `${t.name} (${t.origin}${t.wallpapers ? `, ${t.wallpapers} wallpapers` : ""})`,
+      title: t.invalid || `${shownName(t)}${t.title ? ` · ${t.name}` : ""} (${t.origin}${t.wallpapers ? `, ${t.wallpapers} wallpapers` : ""})`,
       onclick: () => {
         if (t.invalid) return;
-        if (t.current) return toast(`${t.name} is already active`);
+        if (t.current) return toast(`${shownName(t)} is already active`);
         this.apply(t.name, card);
       },
     },
       box,
       el("div", { class: "meta" },
-        el("span", { class: "name" }, t.name),
+        el("span", { class: "name" }, shownName(t)),
         t.mode === "light" ? el("span", { class: "badge" }, "light") : null,
-        t.origin === "user" ? el("span", { class: "badge" }, "yours") : null,
+        ...(t.badges || []).map((b) => el("span", { class: "badge" }, b)),
+        ...this.pins.filter((p) => p.theme === t.name).slice(0, 1).map(() => el("span", {
+          class: "badge pin", title: `Pinned: ${this.pins.filter((p) => p.theme === t.name).map((p) => appName(p.app)).join(", ")} keep this theme`,
+        }, "📌")),
         contrastBadge(t)));
     if (!t.invalid) {
       const star = el("span", {

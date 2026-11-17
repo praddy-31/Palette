@@ -14,6 +14,10 @@ pub(crate) struct ScheduleView {
     pub(crate) lon: Option<f64>,
     pub(crate) day_at: String,
     pub(crate) night_at: String,
+    /// Saved bars for the day and the night ("" = the bar stays), and every saved bar.
+    pub(crate) day_bar: String,
+    pub(crate) night_bar: String,
+    pub(crate) bars: Vec<String>,
     /// "Singapore, Singapore", or typed coordinates.
     pub(crate) place: Option<String>,
     /// City suggested by the Mac's time zone.
@@ -61,6 +65,12 @@ pub(crate) fn schedule_view(paths: &Paths) -> Result<ScheduleView, AppError> {
         lon: s.lon,
         day_at: sch::fmt_hm(s.day_at),
         night_at: sch::fmt_hm(s.night_at),
+        day_bar: s.day_bar.clone(),
+        night_bar: s.night_bar.clone(),
+        bars: palette::desktop::bar::saved::list(paths)
+            .into_iter()
+            .map(|b| b.name)
+            .collect(),
         place: st.place.clone(),
         suggestion: sch::suggest_city().map(|c| c.name.to_string()),
         today,
@@ -88,6 +98,10 @@ pub(crate) struct ScheduleInput {
     pub(crate) lon: Option<f64>,
     pub(crate) day_at: String,
     pub(crate) night_at: String,
+    #[serde(default)]
+    pub(crate) day_bar: String,
+    #[serde(default)]
+    pub(crate) night_bar: String,
 }
 
 /// Save the schedule (`palette schedule on/off`). If it's on, switches at
@@ -114,6 +128,8 @@ pub(crate) async fn schedule_save(
             lon: input.lon,
             day_at: sch::parse_hm(&input.day_at).map_err(err)?,
             night_at: sch::parse_hm(&input.night_at).map_err(err)?,
+            day_bar: input.day_bar,
+            night_bar: input.night_bar,
         };
         let result = sch::save(&paths, new).map_err(err)?;
         Ok::<_, AppError>((schedule_view(&paths)?, schedule_applied(result)))

@@ -151,7 +151,11 @@ pub struct Issue {
     pub used_for: &'static str,
     /// What Palette already does about it, if anything.
     pub applied: Option<&'static str>,
-    /// The nearest lighter/darker `fg` (same hue) that reaches `min`.
+    /// The key the suggestion changes: the text, except on the selection, where the
+    /// selection moves (darkening `foreground` for a white selection would ruin it on
+    /// the background).
+    pub key: &'static str,
+    /// The nearest lighter/darker `key` (same hue) that reaches `min`.
     pub suggested: String,
 }
 
@@ -166,7 +170,7 @@ impl Issue {
 
     /// What to do: Palette's own fix, and the suggested colour.
     pub fn fix(&self) -> String {
-        let suggest = format!("try {} = \"{}\"", self.fg, self.suggested);
+        let suggest = format!("try {} = \"{}\"", self.key, self.suggested);
         match self.applied {
             Some(done) => format!("Palette: {done}. To fix the theme, {suggest}"),
             None => format!("To fix the theme, {suggest}"),
@@ -231,6 +235,13 @@ pub fn colors_at(name: &str, c: &Colors, level: Level) -> Report {
             }
             // Rounded down to what is shown, so 2.97 reads "2.9", not a failing "3.0".
             let ratio = (exact * 10.0).floor() / 10.0;
+            // Selected text: move the selection away from the text, never the text
+            // (it is also body text on the background).
+            let (key, suggested) = if r.bg == "selection" {
+                (r.bg, reach(bg, fg, r.min))
+            } else {
+                (r.fg, reach(fg, bg, r.min))
+            };
             Some(Issue {
                 fg: r.fg,
                 bg: r.bg,
@@ -240,7 +251,8 @@ pub fn colors_at(name: &str, c: &Colors, level: Level) -> Report {
                 min: r.min,
                 used_for: r.used_for,
                 applied: r.applied,
-                suggested: reach(fg, bg, r.min),
+                key,
+                suggested,
             })
         })
         .collect();
@@ -309,6 +321,63 @@ pub struct AppVerdict {
     pub grade: &'static str,
     /// What's wrong, one short phrase each; empty when ok.
     pub why: Vec<String>,
+}
+
+/// One kind of selection and the apps that draw it (23b): what each app really gets for the
+/// theme as used (after Palette's fixes and your edits).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SelectionUse {
+    /// The theme key it comes from: `selection`, `editor_selection` or `list_selection`.
+    pub key: &'static str,
+    pub what: &'static str,
+    pub apps: &'static str,
+    pub hex: String,
+    /// The text drawn on it.
+    pub text: String,
+}
+
+/// The selections a theme gives each kind of app, in the colours apps get.
+pub fn selections(paths: &Paths, name: &str) -> Result<Vec<SelectionUse>> {
+    let (t, _) = theme::load_fixed(paths, name)?;
+    let level = crate::normalise::level_for(paths, name);
+    Ok(selections_of(&t.colors, level))
+}
+
+pub fn selections_of(c: &theme::Colors, level: Level) -> Vec<SelectionUse> {
+    let sel = c.get("selection").to_string();
+    let text = c.get("bright_foreground").to_string();
+    let es = crate::normalise::editor_selection(c, level);
+    let ls = crate::normalise::list_selection(c, level);
+    vec![
+        SelectionUse {
+            key: "selection",
+            what: "Terminals",
+            apps: "Ghostty, kitty, Alacritty, WezTerm, Rex, herdr, VSCodium's terminal",
+            hex: sel.clone(),
+            text: text.clone(),
+        },
+        SelectionUse {
+            key: "editor_selection",
+            what: "Selected code in editors",
+            apps: "VSCodium, Zed",
+            hex: es,
+            text: c.get("foreground").to_string(),
+        },
+        SelectionUse {
+            key: "list_selection",
+            what: "Selected line in lists",
+            apps: "lazygit, fzf",
+            hex: ls,
+            text: c.get("foreground").to_string(),
+        },
+        SelectionUse {
+            key: "selection",
+            what: "Menus, panels and pills",
+            apps: "VSCodium and Zed lists, tmux, btop, Obsidian, SketchyBar pills, Palette",
+            hex: sel,
+            text,
+        },
+    ]
 }
 
 /// `palette check --app`: one verdict per kind of app for `name` (default: the active theme).

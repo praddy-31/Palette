@@ -9,6 +9,13 @@ local window = {
   window_background_opacity = {{ g.opacity }},
   macos_window_background_blur = {{ g.blur }},
 {%- endif %}
+{%- set f = font.wezterm %}
+{%- if f.size %}
+  font_size = {{ f.size }},
+{%- endif %}
+{%- if f.family %}
+  font = require("wezterm").font("{{ f.family }}"),
+{%- endif %}
 }
 return {
   foreground = "{{ foreground }}",

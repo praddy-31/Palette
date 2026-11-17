@@ -13,22 +13,131 @@ pub(crate) struct AppRow {
     /// On and installed but not hooked up yet (e.g. new in this version):
     /// Settings offers a "Set up" button.
     pub(crate) can_wire: bool,
+    /// Has colours of its own, so it can keep its own theme (ROADMAP 24).
+    pub(crate) pinnable: bool,
+    /// The theme it keeps (`None`: follows the main theme).
+    pub(crate) pin: Option<String>,
+    /// Background, foreground, accent and two more of the theme this app gets.
+    pub(crate) swatches: Vec<String>,
+}
+
+/// The colours an app row shows, by their names in `colors.toml`. An unknown name once
+/// panicked here (`color2`), and release builds abort on a panic: Settings quit the app.
+const SWATCH_KEYS: [&str; 5] = ["background", "foreground", "accent", "green", "magenta"];
+
+/// A few colours of `theme` for an app row (loaded once per theme).
+fn swatches(
+    paths: &palette::Paths,
+    cache: &mut BTreeMap<String, Vec<String>>,
+    theme: &str,
+) -> Vec<String> {
+    cache
+        .entry(theme.to_string())
+        .or_insert_with(|| {
+            palette::theme::load(paths, theme)
+                .map(|t| {
+                    SWATCH_KEYS
+                        .iter()
+                        .filter_map(|k| t.colors.try_get(k).map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default()
+        })
+        .clone()
 }
 
 /// Every app Palette can theme, plus wallpaper and light/dark.
 #[tauri::command]
 pub(crate) fn apps() -> Result<Vec<AppRow>, AppError> {
     let paths = paths()?;
+    let pins = palette::settings::load(&paths).unwrap_or_default().pins;
+    let current = palette::state::current_theme(&paths).ok().flatten();
+    let mut cache = BTreeMap::new();
     Ok(palette::apps(&paths)
         .map_err(err)?
         .into_iter()
         .map(|a| AppRow {
             can_wire: a.on && a.installed && !a.wired && a.detail.starts_with("not wired"),
+            pinnable: palette::targets::get(a.name).is_some_and(|t| t.output.is_some()),
+            pin: pins.get(a.name).cloned(),
+            swatches: pins
+                .get(a.name)
+                .or(current.as_ref())
+                .map(|t| swatches(&paths, &mut cache, t))
+                .unwrap_or_default(),
             name: a.name,
             on: a.on,
             installed: a.installed,
             wired: a.wired,
             detail: a.detail,
+        })
+        .collect())
+}
+
+/// Herdr's frost on or off (`palette glass herdr-app --frost`); needs Herdr open.
+#[tauri::command]
+pub(crate) async fn set_herdr_frost(on: bool) -> Result<String, AppError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let paths = paths()?;
+        palette::herdr_frost(&paths, on).map_err(err)
+    })
+    .await
+    .map_err(err)?
+}
+
+/// Pin an app to a theme (`palette pin`), or (`None`) let it follow the main theme again.
+#[tauri::command]
+pub(crate) async fn set_pin(
+    app: AppHandle,
+    name: String,
+    theme: Option<String>,
+) -> Result<Vec<String>, AppError> {
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let paths = paths()?;
+        let done = palette::pin(&paths, &name, theme.as_deref()).map_err(err)?;
+        Ok::<_, AppError>(
+            done.map(|s| applied(name, &s.effects).problems)
+                .unwrap_or_default(),
+        )
+    })
+    .await
+    .map_err(err)??;
+    tray::refresh(&app);
+    Ok(result)
+}
+
+/// The themes an app can be pinned to: (folder name, name shown), for the row's menu.
+#[tauri::command]
+pub(crate) fn pin_choices() -> Result<Vec<(String, String)>, AppError> {
+    let paths = paths()?;
+    Ok(palette::theme::list(&paths)
+        .map_err(err)?
+        .into_iter()
+        .map(|(n, _)| (palette::title(&paths, &n), n))
+        .map(|(title, n)| (n, title))
+        .collect())
+}
+
+#[derive(Serialize)]
+pub(crate) struct PinRow {
+    pub(crate) app: String,
+    pub(crate) theme: String,
+    pub(crate) title: String,
+    pub(crate) missing: bool,
+}
+
+/// Every pin, for the picker's chips and badges.
+#[tauri::command]
+pub(crate) fn pins() -> Result<Vec<PinRow>, AppError> {
+    let paths = paths()?;
+    Ok(palette::pins(&paths)
+        .map_err(err)?
+        .into_iter()
+        .map(|p| PinRow {
+            title: palette::title(&paths, &p.theme),
+            app: p.app,
+            theme: p.theme,
+            missing: p.missing,
         })
         .collect())
 }
@@ -64,15 +173,26 @@ pub(crate) struct Prefs {
     pub(crate) glass: std::collections::BTreeMap<&'static str, GlassPref>,
     /// Performance mode and the parts it covers.
     pub(crate) performance: PerfPref,
+    /// Fonts from Palette (`palette font`): app → size and family, `None` = yours.
+    pub(crate) fonts: std::collections::BTreeMap<&'static str, FontPref>,
+    /// Herdr shows Palette's frosted copy of its layout (`palette glass herdr-app --frost`).
+    pub(crate) herdr_frost: bool,
     /// "ready" or "on-demand".
     pub(crate) windows: &'static str,
     /// What a menu bar click opens: "menu", "picker" or "quick-switcher".
     pub(crate) menu_click: &'static str,
+    pub(crate) reopen: &'static str,
     /// One line per switch in palette.log.
     pub(crate) close_idle_settings: bool,
     pub(crate) log: bool,
     /// Monochrome themes: spaced greys and the tint (Settings → General).
     pub(crate) monochrome: crate::colours::MonoPref,
+}
+
+#[derive(Serialize, Clone)]
+pub(crate) struct FontPref {
+    pub(crate) size: Option<f32>,
+    pub(crate) family: Option<String>,
 }
 
 #[derive(Serialize, Clone, Copy)]
@@ -112,6 +232,7 @@ pub(crate) async fn set_performance(
         };
         let p = palette::performance(&paths()?, on, &parts).map_err(err)?;
         tray::refresh(&app);
+        crate::beats::sync_soon();
         Ok(p.into())
     })
     .await
@@ -130,6 +251,9 @@ pub(crate) struct GlassPref {
 pub(crate) fn prefs(app: AppHandle) -> Result<Prefs, AppError> {
     let settings = palette::settings::load(&paths()?).map_err(err)?;
     Ok(Prefs {
+        herdr_frost: paths()
+            .map(|p| palette::herdr_frost_on(&p))
+            .unwrap_or(false),
         next_cycles: settings.next_cycles.as_str(),
         bar_scroll: settings.bar_scroll,
         hotkey: settings.hotkey.clone(),
@@ -137,6 +261,7 @@ pub(crate) fn prefs(app: AppHandle) -> Result<Prefs, AppError> {
         welcomed: settings.welcomed,
         windows: settings.windows.as_str(),
         menu_click: settings.menu_click.as_str(),
+        reopen: settings.reopen.as_str(),
         log: settings.log,
         close_idle_settings: settings.close_idle_settings,
         monochrome: settings.monochrome.into(),
@@ -145,6 +270,19 @@ pub(crate) fn prefs(app: AppHandle) -> Result<Prefs, AppError> {
         zed_glass: settings.zed_glass.as_str(),
         zed_strength: settings.zed_strength,
         performance: settings.performance.into(),
+        fonts: palette::settings::FONT_APPS
+            .iter()
+            .map(|&app| {
+                let f = settings.fonts.get(app).cloned().unwrap_or_default();
+                (
+                    app,
+                    FontPref {
+                        size: f.size,
+                        family: f.family,
+                    },
+                )
+            })
+            .collect(),
         glass: palette::settings::GLASS_APPS
             .iter()
             .map(|&app| {
@@ -183,6 +321,35 @@ pub(crate) async fn set_glass(
             .transpose()
             .map_err(err)?;
         palette::glass(&paths()?, &app, kind, strength, blur)
+            .map(|_| ())
+            .map_err(err)
+    })
+    .await
+    .map_err(err)?
+}
+
+/// An app's font (`palette font`): `size`/`family` set it, `clear_size`/`clear_family` give
+/// that part back to your own setting; anything not passed stays.
+#[tauri::command]
+pub(crate) async fn set_font(
+    app: String,
+    size: Option<f32>,
+    family: Option<String>,
+    clear_size: Option<bool>,
+    clear_family: Option<bool>,
+) -> Result<(), AppError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let size = if clear_size == Some(true) {
+            Some(None)
+        } else {
+            size.map(Some)
+        };
+        let family = if clear_family == Some(true) {
+            Some(None)
+        } else {
+            family.map(Some)
+        };
+        palette::font(&paths()?, &app, size, family)
             .map(|_| ())
             .map_err(err)
     })
@@ -302,6 +469,8 @@ pub(crate) struct SystemView {
     pub(crate) label: String,
     /// Linux: how to bind the quick switcher in the desktop (`None` on macOS).
     pub(crate) quick_switch_hint: Option<String>,
+    /// For the line under Settings → General's heading.
+    pub(crate) version: &'static str,
 }
 
 /// Mac or Linux mode, and the desktop: Settings hides the Mac pages on Linux.
@@ -316,5 +485,70 @@ pub(crate) fn system_info() -> SystemView {
         desktop: info.desktop,
         quick_switch_hint: palette::quick_switch_hint(info.desktop, &exe),
         label: info.label,
+        version: palette::VERSION,
+    }
+}
+
+/// Palette's own glass (15b) as it is now (solid in Performance mode): the picker and quick
+/// switcher ask for it each time they open.
+#[derive(Serialize)]
+pub(crate) struct OwnGlass {
+    pub(crate) kind: &'static str,
+    /// The window's background, 1 = solid.
+    pub(crate) opacity: f64,
+}
+
+#[tauri::command]
+pub(crate) fn palette_glass() -> OwnGlass {
+    own_glass()
+}
+
+pub(crate) fn own_glass() -> OwnGlass {
+    use palette::settings::TermGlass;
+    let settings = paths()
+        .ok()
+        .and_then(|p| palette::settings::load(&p).ok())
+        .unwrap_or_default();
+    let g = settings.glass("palette");
+    match g.kind {
+        TermGlass::Blurred | TermGlass::Clear => OwnGlass {
+            kind: g.kind.as_str(),
+            opacity: 1.0 - f64::from(g.strength.min(100)) / 100.0,
+        },
+        _ => OwnGlass {
+            kind: "solid",
+            opacity: 1.0,
+        },
+    }
+}
+
+/// Settings → General → "Opening Palette again shows" (`palette ui --reopen`).
+#[tauri::command]
+pub(crate) fn set_reopen(what: String) -> Result<&'static str, AppError> {
+    let r = palette::settings::Reopen::parse(&what).map_err(err)?;
+    Ok(palette::set_reopen(&paths()?, Some(r))
+        .map_err(err)?
+        .as_str())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every swatch name is a colour every theme has (a missing one aborted the app).
+    #[test]
+    fn swatch_keys_are_real_colour_names() {
+        for key in SWATCH_KEYS {
+            assert!(
+                palette::theme::REQUIRED_KEYS.contains(&key),
+                "{key} isn't a colors.toml key"
+            );
+        }
+        // An empty fake home: tokyo-night is bundled, so nothing needs writing there.
+        let home = std::env::temp_dir().join(format!("palette-swatch-{}", std::process::id()));
+        let paths = palette::Paths::fake_home(&home);
+        let got = swatches(&paths, &mut BTreeMap::new(), "tokyo-night");
+        assert_eq!(got.len(), SWATCH_KEYS.len(), "{got:?}");
+        assert!(got.iter().all(|c| c.starts_with('#')), "{got:?}");
     }
 }

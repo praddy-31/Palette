@@ -1,0 +1,19 @@
+{% set g = glass["herdr-app"] -%}
+{% set see = g.kind == "clear" -%}
+{
+  "background": "{{ background }}",
+  "foreground": "{{ foreground }}",
+  "selection": "{{ selection }}",
+  "cursor": "{{ bright_foreground }}",
+  "ansi": [{% for colour in ansi %}"{{ colour }}"{% if not loop.last %}, {% endif %}{% endfor %}],
+  "colors": {
+    "accent": "{{ accent }}",
+    "accent_foreground": "{{ accent | ink(darker_background, bright_foreground) }}",
+    "ring": "{{ accent }}"{% if see %},
+    "background": "{{ background }}{{ g.alpha }}",
+    "surface": "{{ background }}{{ g.alpha }}",
+    "raised": "{{ lighter_background }}{{ g.alpha }}",
+    "canvas": "{{ background }}{{ g.alpha }}",
+    "chrome": "{{ darker_background }}{{ g.alpha }}"{% endif %}
+  }
+}

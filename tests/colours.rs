@@ -54,3 +54,29 @@ fn check_fix_applies_every_suggestion() {
             .contains("KEY=#RRGGBB")
     );
 }
+
+/// 17d: labels. Downloaded = installed, made here = yours, colour edits add edited; bundled
+/// themes have none until edited.
+#[test]
+fn themes_are_labelled_installed_yours_or_edited() {
+    let home = Home::new();
+    let nord = include_str!("../themes/nord/colors.toml");
+    home.write(".config/palette/themes/mine/colors.toml", nord);
+    home.write(".config/palette/themes/fetched/colors.toml", nord);
+    home.write(
+        ".config/palette/themes/fetched/.palette-source",
+        "url = \"https://github.com/someone/fetched\"\n",
+    );
+    home.ok(&["colours", "tokyo-night", "--set", "accent=#ff0000"]);
+    let list = home.ok(&["list"]);
+    let line = |name: &str| {
+        list.lines()
+            .find(|l| l.split_whitespace().any(|w| w == name))
+            .unwrap_or_else(|| panic!("{name}: {list}"))
+            .to_string()
+    };
+    assert!(line("mine").contains(" yours "), "{list}");
+    assert!(line("fetched").contains(" installed "), "{list}");
+    assert!(line("tokyo-night").contains("bundled,edited"), "{list}");
+    assert!(line("nord").contains("bundled "), "{list}");
+}

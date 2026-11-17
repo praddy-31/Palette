@@ -97,8 +97,10 @@ output for one app.
 
 Not allowed for files that can run programs: `sketchybar.sh`, `borders.sh`,
 `shell.sh`, `tmux.conf`, `fzf.opts`, `starship.toml`, `lazygit.yml`,
-`neovim.lua` and `obsidian.css` (CSS can load from the web). Allowed: `ghostty.conf`, `kitty.conf`, `alacritty.toml`,
-`vscodium.json`, `zed.json`, `btop.theme`. A theme containing one is
+`neovim.lua`, `obsidian.css` (CSS can load from the web) and `rex.conf` (Ghostty's
+format, imported by Rex). Allowed: `ghostty.conf`, `kitty.conf`, `alacritty.toml`,
+`vscodium.json`, `zed.json`, `btop.theme`, `herdr-app.json`, `micro.micro`, `orca.json`, and on
+Linux `foot.ini`, `fuzzel.ini`, `konsole.colorscheme`. A theme containing one of the others is
 refused with an error. Override files must be regular files, not symlinks.
 
 ## Template context
@@ -142,6 +144,10 @@ Filters:
     tmux.conf  vscodium.json  zed.json  neovim.lua  btop.theme  shell.sh
     starship.toml  fzf.opts  lazygit.yml  sketchybar-item.sh  obsidian.css
     habit-tracker.json  chess-review.json  dispatch.json  easyplots.json
+    rex.conf  herdr-app.json  micro.micro
+  rex/palette                     # the copy Rex imports (its theme "palette")
+  rex-previous-themes             # your Rex themes before Palette's, given back when Rex is off
+  herdr-app-theme.json            # what Palette last copied into Herdr's themes folder
   themes/<name>/                  # user themes (or wallpapers for bundled ones)
   backup/<UTC time>/              # originals saved by `palette init` (last 5 kept)
   wiring/<target>.previous        # settings `init` changed (btop, VSCodium), for --remove

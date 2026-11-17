@@ -320,6 +320,17 @@ fn close_settings(w: &WebviewWindow) {
 
 /// The picker opens under the tray icon when clicked there; otherwise (bar
 /// item, `palette ui`) at the top right, just below a SketchyBar-height bar.
+/// Palette opened again while it runs (Finder, Spotlight, a second launch): the picker,
+/// Settings or the quick switcher, as chosen (`palette ui --reopen`, Settings → General).
+pub(crate) fn reopened(app: &AppHandle) {
+    use palette::settings::Reopen;
+    match app_settings().reopen {
+        Reopen::Picker => show_picker(app, false),
+        Reopen::Settings => show_settings(app),
+        Reopen::Quick => toggle_overlay(app),
+    }
+}
+
 pub(crate) fn show_picker(app: &AppHandle, from_tray: bool) {
     sync_hotkey(app);
     let Some(window) = window(app, "picker") else {
@@ -329,6 +340,7 @@ pub(crate) fn show_picker(app: &AppHandle, from_tray: bool) {
         put_away(&window);
         return;
     }
+    apply_glass(&window);
     let placed = from_tray && window.move_window(Position::TrayBottomCenter).is_ok();
     if !placed {
         place_top_right(&window);
@@ -361,6 +373,7 @@ pub(crate) fn toggle_overlay(app: &AppHandle) {
     if window.is_visible().unwrap_or(false) {
         put_away(&window);
     } else {
+        apply_glass(&window);
         let _ = window.center();
         show(&window);
     }
@@ -406,6 +419,30 @@ pub(crate) fn open_url(app: &AppHandle, url: &str) {
         }
         _ => {}
     }
+}
+
+/// Palette's own glass (ROADMAP 15b): macOS's blur behind the picker or quick switcher when
+/// it's Blurred, none otherwise (Clear and Solid: the page decides how see-through it is).
+/// Set each time the window opens, so a change in Settings or Performance mode shows next time.
+fn apply_glass(window: &WebviewWindow) {
+    #[cfg(target_os = "macos")]
+    {
+        use tauri::window::{Effect, EffectState, EffectsBuilder};
+        let _ = if own_glass().kind == "blurred" {
+            window.set_effects(
+                EffectsBuilder::new()
+                    // Follows the Mac's light or dark, which Palette sets from the theme.
+                    .effect(Effect::UnderWindowBackground)
+                    .state(EffectState::Active)
+                    .radius(14.0)
+                    .build(),
+            )
+        } else {
+            window.set_effects(None::<tauri::utils::config::WindowEffectsConfig>)
+        };
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = window;
 }
 
 #[cfg(test)]

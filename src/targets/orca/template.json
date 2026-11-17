@@ -1,0 +1,67 @@
+{# Palette builds its Orca plugin from this: the app theme, then after the marker line the terminal theme; @MODE@ becomes dark and light. -#}
+{
+  "schemaVersion": 1,
+  "base": "@MODE@",
+  "tokens": {
+    "--background": "{{ background }}",
+    "--foreground": "{{ foreground }}",
+    "--editor-surface": "{{ background }}",
+    "--card": "{{ dark_background }}",
+    "--card-foreground": "{{ foreground }}",
+    "--popover": "{{ lighter_background }}",
+    "--popover-foreground": "{{ foreground }}",
+    "--primary": "{{ accent }}",
+    "--primary-foreground": "{{ accent | ink(darker_background, bright_foreground) }}",
+    "--secondary": "{{ lighter_background }}",
+    "--secondary-foreground": "{{ foreground }}",
+    "--muted": "{{ lighter_background }}",
+    "--muted-foreground": "{{ dark_foreground }}",
+    "--accent": "{{ selection }}",
+    "--accent-foreground": "{{ bright_foreground }}",
+    "--border": "{{ lighter_background }}",
+    "--input": "{{ muted }}",
+    "--ring": "{{ accent }}",
+    "--sidebar": "{{ dark_background }}",
+    "--sidebar-foreground": "{{ foreground }}",
+    "--sidebar-border": "{{ lighter_background }}"
+  },
+  "tokenColors": [
+    { "scope": ["comment", "punctuation.definition.comment"], "settings": { "foreground": "{{ dark_foreground }}", "fontStyle": "italic" } },
+    { "scope": ["string", "string.quoted", "markup.inline.raw"], "settings": { "foreground": "{{ green }}" } },
+    { "scope": ["constant.numeric", "constant.language", "constant.character", "constant.other"], "settings": { "foreground": "{{ orange }}" } },
+    { "scope": ["keyword", "storage.type", "storage.modifier", "keyword.control"], "settings": { "foreground": "{{ magenta }}" } },
+    { "scope": ["keyword.operator", "punctuation.accessor"], "settings": { "foreground": "{{ cyan }}" } },
+    { "scope": ["entity.name.function", "support.function", "meta.function-call"], "settings": { "foreground": "{{ blue }}" } },
+    { "scope": ["entity.name.type", "entity.name.class", "support.type", "support.class"], "settings": { "foreground": "{{ yellow }}" } },
+    { "scope": ["variable", "meta.definition.variable"], "settings": { "foreground": "{{ foreground }}" } },
+    { "scope": ["variable.other.property", "support.variable.property", "meta.object-literal.key"], "settings": { "foreground": "{{ cyan }}" } },
+    { "scope": ["variable.parameter"], "settings": { "foreground": "{{ light_foreground }}" } },
+    { "scope": ["entity.name.tag"], "settings": { "foreground": "{{ red }}" } },
+    { "scope": ["entity.other.attribute-name"], "settings": { "foreground": "{{ yellow }}" } },
+    { "scope": ["punctuation", "meta.brace"], "settings": { "foreground": "{{ dark_foreground }}" } },
+    { "scope": ["invalid"], "settings": { "foreground": "{{ red }}" } },
+    { "scope": ["markup.heading", "entity.name.section"], "settings": { "foreground": "{{ accent }}", "fontStyle": "bold" } },
+    { "scope": ["markup.bold"], "settings": { "fontStyle": "bold" } },
+    { "scope": ["markup.italic"], "settings": { "fontStyle": "italic" } },
+    { "scope": ["markup.underline.link", "string.other.link"], "settings": { "foreground": "{{ accent }}" } },
+    { "scope": ["markup.inserted"], "settings": { "foreground": "{{ green }}" } },
+    { "scope": ["markup.deleted"], "settings": { "foreground": "{{ red }}" } },
+    { "scope": ["markup.changed"], "settings": { "foreground": "{{ yellow }}" } }
+  ]
+}
+@@terminal@@
+{
+  "schemaVersion": 1,
+  "mode": "@MODE@",
+  "terminal": {
+    "foreground": "{{ foreground }}",
+    "background": "{{ background }}",
+    "cursor": "{{ bright_foreground }}",
+    "cursorAccent": "{{ background }}",
+    "selectionBackground": "{{ selection }}",
+{%- set names = ["black", "red", "green", "yellow", "blue", "magenta", "cyan", "white", "brightBlack", "brightRed", "brightGreen", "brightYellow", "brightBlue", "brightMagenta", "brightCyan", "brightWhite"] %}
+{%- for colour in ansi %}
+    "{{ names[loop.index0] }}": "{{ colour }}"{% if not loop.last %},{% endif %}
+{%- endfor %}
+  }
+}

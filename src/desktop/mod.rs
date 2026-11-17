@@ -276,10 +276,40 @@ const OPTIONAL: &[(Tool, &str)] = &[(Tool::Windows, "gaps.outer_top_other")];
 
 /// Change single settings by dotted key (`pill.height=28`), for the CLI.
 /// The value is read as TOML (`28`, `true`, `"text"`), else as text.
+/// `palette desktop bar set` keys that set an option of every item of one kind.
+const ITEM_KEYS: [(&str, &str); 2] = [("gpu", "gpu"), ("disk_at", "disk")];
+
 pub fn set_keys(paths: &Paths, tool: Tool, pairs: &[(String, String)]) -> Result<Applied> {
     let mut value = get(paths, tool)?;
     for (key, raw) in pairs {
         let new = parse_value(raw);
+        // The bar's per-item options, for every item of that kind (items sit in a list of
+        // pills, which dotted keys don't reach): `gpu=raw`, `disk_at=70`.
+        if tool == Tool::Bar
+            && let Some(kind) = ITEM_KEYS
+                .iter()
+                .find(|(k, _)| k == key)
+                .map(|(_, kind)| kind)
+        {
+            let items = value
+                .get_mut("pills")
+                .and_then(|p| p.as_array_mut())
+                .into_iter()
+                .flatten()
+                .filter_map(|p| p.get_mut("items")?.as_array_mut())
+                .flatten()
+                .filter(|i| i.get("kind").and_then(|k| k.as_str()) == Some(kind))
+                .filter_map(|i| i.as_table_mut());
+            let mut found = false;
+            for item in items {
+                item.insert(key.clone(), new.clone());
+                found = true;
+            }
+            if !found {
+                bail!("`{key}` is for the {kind} pill, which the bar doesn't have");
+            }
+            continue;
+        }
         let mut at = &mut value;
         let parts: Vec<&str> = key.split('.').collect();
         for (i, part) in parts.iter().enumerate() {
@@ -385,6 +415,9 @@ fn write_files(
     };
     let model = model_path(paths, tool);
     write_atomic(&model, &text, false)?;
+    if tool == Tool::Bar {
+        bar::saved::follow(paths, &text)?;
+    }
     let mut written = Vec::new();
     for f in &files {
         write_atomic(&f.path, &f.text, f.executable)?;

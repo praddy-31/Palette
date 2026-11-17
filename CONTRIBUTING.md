@@ -10,7 +10,7 @@ You need an Apple silicon Mac with Rust (rustup), Xcode Command Line Tools
 `cargo install tauri-cli --version '^2'`. No Node: the app's UI is plain HTML/JS.
 
 ```sh
-cargo test                                             # unit and CLI tests, all in fake homes
+cargo test --workspace                                 # unit and CLI tests, all in fake homes
 cargo fmt
 cargo clippy --workspace --all-targets -- -D warnings  # core and app
 cargo build --release                                  # target/release/palette
@@ -33,14 +33,16 @@ Tests use a temporary fake home from `tests/common/mod.rs`.
 
 ## Ground rules
 
-- Palette writes only to `~/.config/palette/`. User configs get one import line, only via
+- Palette writes to `~/.config/palette/` (and, for apps that only read themes from their own
+  folder, Palette's own theme file there). User configs get one import line, only via
   `palette init`, which backs up first. Never overwrite a user's config.
 - Themes are data. Never execute anything from a theme folder.
 - Every feature has a library function, a CLI command and an app control. The CLI and the
   app contain no logic of their own.
 - One app is one module under `src/targets/<name>/`. Adding one must not touch the others.
 - Keep the binary small. Justify any new dependency in your pull request.
-- No telemetry. No network except an explicit `palette install` or `palette update`.
+- No telemetry. No network except an explicit `palette install`, `palette update` or
+  `palette bg get`, and the bar's weather pill if someone adds it.
 
 ## Commits
 

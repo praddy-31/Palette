@@ -55,6 +55,13 @@
         </label>
         <div style="display:flex;gap:10px;align-items:center;margin:10px 0">
           <input id="mine-search" class="search" type="text" placeholder="Search: a name, or warm, dark, blue…" autocomplete="off" spellcheck="false" style="flex:1">
+          <select id="mine-kind" class="select" title="Which themes to show">
+            <option value="">All</option>
+            <option value="installed">Installed</option>
+            <option value="yours">Yours</option>
+            <option value="edited">Edited</option>
+            <option value="bundled">Bundled</option>
+          </select>
           <span id="mine-count" class="sub" style="color:var(--dim);font-size:11.5px"></span>
         </div>
         <div id="mine"></div>
@@ -65,12 +72,16 @@
         <p class="note">Everything is on by default. Switch an app off to keep its own look:
           Palette takes its line out of that app's config (backed up first) and restores it.</p>
         <div id="apps"></div>
+        <p class="note">Not listed: fastfetch, ls, git and other plain command-line tools. They use
+          your terminal's 16 colours, so they follow the terminal they run in: pin that terminal to
+          keep them on one theme.</p>
       </section>
 
       <!-- ---------------- Get themes ---------------- -->
       <section data-pane="themes" hidden>
         <h1>Get themes</h1>
         <p class="note">Community themes made for Omarchy; they work here too, wallpapers included.
+          With the Rex app on this Mac, its own themes are listed too ("by Rex", read from the app).
           The list is built in, so browsing stays offline; Install downloads that one theme.
           Palette takes only its colours, wallpapers and preview, never config files or scripts.</p>
         <div class="gt-bar">
@@ -82,6 +93,7 @@
             <option value="monochrome">Monochrome</option>
             <option value="light">Light</option>
             <option value="installed">Installed</option>
+            <option value="rex">From Rex</option>
           </select>
           <button id="gt-sheet" class="btn" title="Every theme here as made and with Palette's fixes, side by side, on one page in your browser (offline; also palette catalog --sheet)">Inspection sheet</button>
         </div>
@@ -217,6 +229,11 @@
         <p class="note legend">Every app Palette can theme: <b class="s ok">✓</b> themed · <b class="s off">–</b> off or not installed.
           <b class="s info">ⓘ</b> notes are for information; <b class="s fix">!</b> needs you.</p>
         <div id="check-out" class="checks"></div>
+        <div class="row">
+          <div><div class="title">What apps show</div><div class="sub">Reads back from each running app whether it shows the current theme: the bar's colours, Rex, Zed, VSCodium, Herdr, Orca, light/dark. Changes nothing</div></div>
+          <button id="verify" class="btn">Verify</button>
+        </div>
+        <div id="verify-out" class="checks"></div>
       </section>
 
       <!-- ---------------- Move ---------------- -->
@@ -253,6 +270,7 @@
       <!-- ---------------- General ---------------- -->
       <section data-pane="general" hidden>
         <h1>General</h1>
+        <p id="version-line" class="label"></p>
         <div class="row">
           <div><div class="title">Quick switch shortcut</div><div class="sub">Opens the quick-switch overlay from anywhere</div></div>
           <span id="hotkey" class="keycap"></span>
@@ -268,6 +286,14 @@
           <select id="menu-click" class="select">
             <option value="menu">Menu</option>
             <option value="picker">Picker</option>
+            <option value="quick-switcher">Quick switcher</option>
+          </select>
+        </div>
+        <div class="row">
+          <div><div class="title">Opening Palette again shows</div><div class="sub">While it runs: clicking Palette in Applications or the Dock, Spotlight, or <code>open -a Palette</code></div></div>
+          <select id="reopen" class="select">
+            <option value="picker">Picker</option>
+            <option value="settings">Settings</option>
             <option value="quick-switcher">Quick switcher</option>
           </select>
         </div>
@@ -317,7 +343,7 @@
       <!-- ---------------- Desktop: bar, windows, borders (desktop.* in desktop.js) ---------------- -->
       <section data-pane="bar" hidden>
         <h1>Bar</h1>
-        <p class="note">Your SketchyBar, built from pills. Drag items to reorder them or move them between pills, Pill ◀ ▶ moves a whole pill,
+        <p class="note">Your SketchyBar, built from pills, at its real size. Drag items or whole pills, add from the tray below,
           click one to change it, and press Apply. Colours follow the theme.</p>
         <div id="dk-bar"></div>
       </section>
@@ -367,9 +393,10 @@
         <h2>Themes and switching</h2>
         <div class="guide">
           <div><span>★ favourites, and whether Next steps through only them</span><button class="link" data-go="mine">My themes → Next theme: favourites only</button><code>palette fav</code></div>
+          <div><span>Show a theme by another name (the folder keeps its own)</span><button class="link" data-go="mine">My themes → ✎ next to the name</button><code>palette rename &lt;theme&gt; &lt;name&gt;</code></div>
           <div class="mac-only"><span>Scroll on the bar's theme pill to switch theme</span><button class="link" data-go="bar">Bar → Scroll on it to switch theme (beside Palette's theme pill)</button><code>palette fav scroll on|off</code></div>
           <div><span>A day theme and a night theme</span><button class="link" data-go="schedule">Schedule</button><code>palette schedule</code></div>
-          <div><span>The quick switch shortcut; what a menu bar click opens</span><button class="link" data-go="general">General → Quick switch shortcut, Menu bar click opens</button><code>palette hotkey, palette ui --click</code></div>
+          <div><span>The quick switch shortcut; what a menu bar click opens; what opening Palette again shows</span><button class="link" data-go="general">General → Quick switch shortcut, Menu bar click opens, Opening Palette again shows</button><code>palette hotkey, palette ui --click, palette ui --reopen</code></div>
           <div><span>More themes from the community</span><button class="link" data-go="themes">Get themes</button><code>palette catalog, palette install</code></div>
         </div>
         <h2>Wallpapers</h2>
@@ -424,6 +451,14 @@
         <div class="row">
           <div><div class="title">Night theme</div></div>
           <select id="sc-night" class="select"></select>
+        </div>
+        <div class="row">
+          <div><div class="title">Day bar</div><div class="sub">A saved bar (Bar page) from the same time as the day theme</div></div>
+          <select id="sc-day-bar" class="select"></select>
+        </div>
+        <div class="row">
+          <div><div class="title">Night bar</div><div class="sub">Switched with the night theme. Choose one by hand and it stays until the next switch</div></div>
+          <select id="sc-night-bar" class="select"></select>
         </div>
         <div class="row">
           <div><div class="title">Switch at</div></div>
@@ -483,6 +518,7 @@
   <script src="welcome.js"></script>
   <script src="schedule.js"></script>
   <script src="desktop.js"></script>
+  <script src="desktop-bar.js"></script>
   <script src="settings-keys.js"></script>
 </body>
 </html>

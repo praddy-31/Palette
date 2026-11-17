@@ -52,23 +52,70 @@ fn render_selected(
 ) -> Result<Vec<OutputFile>> {
     let env = environment()?;
     let settings = crate::settings::load(paths).unwrap_or_default();
-    let ctx = context(theme, &settings);
     let shown = crate::effects::wallpaper_to_use(paths, theme, wallpaper);
-    let lifts = crate::glass::lifts(paths, theme, shown.as_deref());
+    // The main theme, then each pinned app's own theme (ROADMAP 24), each with its context
+    // and glass lifts (the wallpaper is the main theme's for all of them).
+    let main = Rendering::new(theme.clone(), paths, &settings, shown.as_deref());
+    let mut pinned: BTreeMap<String, Rendering> = BTreeMap::new();
+    for name in pinned_themes(&settings, theme) {
+        if let Ok(t) = crate::theme::load(paths, &name) {
+            pinned.insert(name, Rendering::new(t, paths, &settings, shown.as_deref()));
+        }
+    }
     targets::all()
         .filter(|t| only.is_none_or(|names| names.contains(&t.name)))
         .filter_map(|t| Some((t.name, t.output.as_ref()?)))
-        .map(|(name, output)| match lifts.get(name) {
-            Some(lift) => {
-                let lifted = Theme {
-                    colors: lift.colors.clone(),
-                    ..theme.clone()
-                };
-                let ctx = context(&lifted, &settings);
-                render_one(&env, &ctx, theme, paths, name, output)
+        .map(|(name, output)| {
+            let r = settings
+                .pins
+                .get(name)
+                .and_then(|p| pinned.get(p))
+                .unwrap_or(&main);
+            match r.lifts.get(name) {
+                Some(lift) => {
+                    let lifted = Theme {
+                        colors: lift.colors.clone(),
+                        ..r.theme.clone()
+                    };
+                    let ctx = context(&lifted, &settings);
+                    render_one(&env, &ctx, &r.theme, paths, name, output)
+                }
+                None => render_one(&env, &r.ctx, &r.theme, paths, name, output),
             }
-            None => render_one(&env, &ctx, theme, paths, name, output),
         })
+        .collect()
+}
+
+/// One theme ready to render with: its template context and its see-through apps' lifts.
+struct Rendering {
+    theme: Theme,
+    ctx: Value,
+    lifts: BTreeMap<&'static str, crate::glass::AppLift>,
+}
+
+impl Rendering {
+    fn new(
+        theme: Theme,
+        paths: &Paths,
+        settings: &crate::settings::Settings,
+        wallpaper: Option<&std::path::Path>,
+    ) -> Self {
+        let ctx = context(&theme, settings);
+        let lifts = crate::glass::lifts(paths, &theme, wallpaper);
+        Self { theme, ctx, lifts }
+    }
+}
+
+/// The themes pinned apps keep, other than `main` (each loaded once).
+fn pinned_themes(
+    settings: &crate::settings::Settings,
+    main: &Theme,
+) -> std::collections::BTreeSet<String> {
+    settings
+        .pins
+        .values()
+        .filter(|t| **t != main.name)
+        .cloned()
         .collect()
 }
 
@@ -167,6 +214,9 @@ fn context(theme: &Theme, settings: &crate::settings::Settings) -> Value {
     vars.insert("pop2".into(), Value::from(look.pop2));
     vars.insert("mode".into(), Value::from(theme.colors.mode.as_str()));
     vars.insert("theme".into(), Value::from(theme.name.clone()));
+    // The name shown (17b, `palette rename`): the bar's theme pill.
+    let title = settings.names.get(&theme.name).unwrap_or(&theme.name);
+    vars.insert("title".into(), Value::from(title.clone()));
     // Editors draw code on the selection (11h): their own, so syntax colours stay readable.
     let level = if settings.original_colours.contains(&theme.name) {
         crate::normalise::Level::Off
@@ -196,7 +246,34 @@ fn context(theme: &Theme, settings: &crate::settings::Settings) -> Value {
         Value::from(alpha(1.0 - see * 0.36)),
     );
     vars.insert("glass".into(), glass_vars(settings));
+    vars.insert("font".into(), font_vars(settings));
     Value::from_object(vars)
+}
+
+/// Fonts from Palette (`palette font`, 22b), one entry per terminal: `size` as text (`"14"`,
+/// `"13.5"`) and `family`, each none when it's yours. Editors get theirs in their own
+/// settings.json instead (`crate::font`).
+fn font_vars(settings: &crate::settings::Settings) -> Value {
+    let map: BTreeMap<String, Value> = crate::settings::FONT_APPS
+        .iter()
+        .map(|app| {
+            let f = settings.fonts.get(*app).cloned().unwrap_or_default();
+            // Both keys always there (strict templates): none = yours, no line.
+            let entry: BTreeMap<String, Value> = BTreeMap::from([
+                (
+                    "size".into(),
+                    f.size
+                        .map_or(Value::from(()), |s| Value::from(s.to_string())),
+                ),
+                (
+                    "family".into(),
+                    f.family.map_or(Value::from(()), Value::from),
+                ),
+            ]);
+            (app.to_string(), Value::from_object(entry))
+        })
+        .collect();
+    Value::from_object(map)
 }
 
 /// Terminal glass (`palette glass`), one entry per app: `kind` (as in
@@ -217,10 +294,19 @@ fn glass_vars(settings: &crate::settings::Settings) -> Value {
             } else {
                 0
             };
+            // Two-digit alpha for `#rrggbbaa` colours (Herdr): the window's own, and a more
+            // solid one for raised surfaces such as the sidebar (like Zed's).
+            let see = match g.kind {
+                TermGlass::Own | TermGlass::Solid => 0.0,
+                _ => f64::from(g.strength.min(100)) / 100.0,
+            };
+            let hex = |o: f64| format!("{:02x}", (o * 255.0).round() as u8);
             let entry: BTreeMap<String, Value> = BTreeMap::from([
                 ("kind".into(), Value::from(g.kind.as_str())),
                 ("opacity".into(), Value::from(opacity)),
                 ("blur".into(), Value::from(blur.min(100))),
+                ("alpha".into(), Value::from(hex(1.0 - see))),
+                ("alpha_raised".into(), Value::from(hex(1.0 - see * 0.36))),
             ]);
             (app.to_string(), Value::from_object(entry))
         })
@@ -361,7 +447,12 @@ mod tests {
         assert_eq!(files.len(), with_output);
         for f in files.iter().filter(|f| f.name != "starship.toml") {
             let s = std::str::from_utf8(&f.contents).unwrap();
-            assert!(s.contains("tokyo-night"), "{} lacks the theme name", f.name);
+            // Herdr's theme format has only its documented colour keys (no free field
+            // for a name, and an unknown key isn't known to be safe there); Orca's
+            // validator refuses unknown keys outright.
+            if f.name != "herdr-app.json" && f.name != "orca.json" {
+                assert!(s.contains("tokyo-night"), "{} lacks the theme name", f.name);
+            }
             assert!(s.ends_with('\n'), "{} lacks a trailing newline", f.name);
             assert!(!f.is_override);
         }
@@ -393,6 +484,61 @@ mod tests {
 
     /// Terminal glass: "own" writes nothing (the user's config decides); every
     /// other kind writes that app's keys, and Alacritty's file stays valid TOML.
+    #[test]
+    fn terminal_font_lines() {
+        use crate::settings::{AppFont, Settings};
+        let env = environment().unwrap();
+        let theme = theme::load(&paths(), "tokyo-night").unwrap();
+        let render = |app: &str, font: Option<AppFont>| {
+            let mut settings = Settings::default();
+            if let Some(f) = font {
+                settings.fonts.insert(app.into(), f);
+            }
+            env.get_template(app)
+                .unwrap()
+                .render(context(&theme, &settings))
+                .unwrap()
+        };
+        let both = || {
+            Some(AppFont {
+                size: Some(13.5),
+                family: Some("Menlo".into()),
+            })
+        };
+        // Yours: no font line at all.
+        for app in ["ghostty", "kitty", "alacritty", "wezterm"] {
+            assert!(!render(app, None).contains("font"), "{app}");
+        }
+        let g = render("ghostty", both());
+        assert!(
+            g.contains("font-family = \"\"\nfont-family = \"Menlo\"\nfont-size = 13.5\n"),
+            "{g}"
+        );
+        let k = render("kitty", both());
+        assert!(k.contains("font_family Menlo\nfont_size 13.5\n"), "{k}");
+        let a = render("alacritty", both());
+        let t: toml::Table = a.parse().expect("valid TOML");
+        assert_eq!(t["font"]["size"].as_float(), Some(13.5));
+        assert_eq!(t["font"]["normal"]["family"].as_str(), Some("Menlo"));
+        let w = render("wezterm", both());
+        assert!(
+            w.contains("  font_size = 13.5,\n  font = require(\"wezterm\").font(\"Menlo\"),\n}"),
+            "{w}"
+        );
+        // Only a size: no family line.
+        let g = render(
+            "ghostty",
+            Some(AppFont {
+                size: Some(12.0),
+                family: None,
+            }),
+        );
+        assert!(
+            g.contains("font-size = 12\n") && !g.contains("font-family"),
+            "{g}"
+        );
+    }
+
     #[test]
     fn terminal_glass_lines() {
         use crate::settings::{Settings, TermGlass, WindowGlass};

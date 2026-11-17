@@ -10,6 +10,16 @@
 export PATH="$PATH:/opt/homebrew/bin"
 [ -f "$HOME/.config/palette/current/sketchybar.sh" ] && source "$HOME/.config/palette/current/sketchybar.sh"
 
+# One app switch sends two events a few milliseconds apart (SketchyBar's front_app_switched
+# and AeroSpace's focus callback): each run waits 0.1 s and only the last one goes on, so
+# the bar is drawn once, with AeroSpace's state after the switch (ROADMAP 18d).
+if [ "$SENDER" = front_app_switched ] || [ "$SENDER" = aerospace_workspace_change ]; then
+  LAST="${TMPDIR:-/tmp}/palette_spaces_last"
+  printf '%s' "$$" > "$LAST"
+  sleep 0.1
+  [ "$(cat "$LAST" 2>/dev/null)" = "$$" ] || exit 0
+fi
+
 # A new display: SketchyBar hears of it a moment before AeroSpace has made
 # its workspace, so look again shortly (once; the trigger isn't a display_change).
 if [ "$SENDER" = display_change ]; then
@@ -18,10 +28,30 @@ fi
 
 ICON_MAP="$HOME/.config/sketchybar/helpers/icon_map.sh"
 [ -f "$ICON_MAP" ] && source "$ICON_MAP"
+# Apps the icon font has no glyph for (your map says :default:): the nearest glyph it has
+# (owner, 2026-11-15). Your own icon_map.sh wins wherever it knows the app.
+# Each glyph must be one no other app uses: a workspace shows a glyph once (DECISIONS 2026-11-16).
+palette_icon() {
+  case "$1" in
+    "Rex" | "Rex Beta") icon_result=":terminal:" ;;
+    "Herdr") icon_result=":hyper:" ;;
+    "Orca") icon_result=":code:" ;;
+    "DeepSeek Harness") icon_result=":deepseek:" ;;
+  esac
+}
+
+# Your choices (Bar page → App icons) win over the map (IDEAS 37b).
+ICONS="$HOME/.config/palette/bar/icons.sh"
+[ -f "$ICONS" ] && source "$ICONS"
 
 app_icon() {
-  if type __icon_map >/dev/null 2>&1; then
+  icon_result=""
+  type user_icon >/dev/null 2>&1 && user_icon "$1"
+  if [ -n "$icon_result" ]; then
+    echo "$icon_result"
+  elif type __icon_map >/dev/null 2>&1; then
     __icon_map "$1"
+    [ "$icon_result" = ":default:" ] && palette_icon "$1"
     echo "$icon_result"
   else
     echo "•"
@@ -29,7 +59,18 @@ app_icon() {
 }
 
 FOCUSED=${FOCUSED_WORKSPACE:-$(aerospace list-workspaces --focused 2>/dev/null)}
-WINDOWS=$(aerospace list-windows --all --format '%{workspace}|%{app-name}' 2>/dev/null)
+WINDOWS=$(aerospace list-windows --all --format '%{workspace}|%{app-name}|%{window-id}' 2>/dev/null)
+# Windows macOS draws now (CoreGraphics window numbers = AeroSpace's ids). An app like Ollama
+# takes its window off screen on ⌘Q but keeps it, and AeroSpace still lists it (owner,
+# 2026-11-16): a workspace whose windows are all off screen gets a faded label. Other
+# workspaces' windows count as on screen (AeroSpace parks them in a corner). No permission:
+# the window list without titles is open to any app. Empty (no answer) = fade nothing.
+ONSCREEN=${PALETTE_ONSCREEN-$(osascript -l JavaScript -e 'ObjC.import("CoreGraphics");
+var l = ObjC.castRefToObject($.CGWindowListCopyWindowInfo($.kCGWindowListOptionOnScreenOnly, 0)), o = [];
+for (var i = 0; i < l.count; i++) { var d = l.objectAtIndex(i);
+  if (ObjC.unwrap(d.objectForKey("kCGWindowLayer")) === 0) o.push(ObjC.unwrap(d.objectForKey("kCGWindowNumber"))); }
+o.join(" ")' 2>/dev/null)}
+FADED="0x66${FG:4}"
 # workspace|display (SketchyBar's numbering of displays), in name order
 PLACES=$(aerospace list-workspaces --monitor all --format '%{workspace}|%{monitor-appkit-nsscreen-screens-id}' 2>/dev/null | sort -t'|' -k1,1V)
 [ -z "$PLACES" ] && exit 0 # AeroSpace isn't running: leave the bar as it is
@@ -39,6 +80,8 @@ slot=0
 while IFS='|' read -r sid display; do
   [ -z "$sid" ] && continue
   has_windows=$(printf '%s\n' "$WINDOWS" | awk -F'|' -v s="$sid" '$1 == s { n++ } END { print n + 0 }')
+  shown=$(printf '%s\n' "$WINDOWS" | awk -F'|' -v s="$sid" -v on=" $ONSCREEN " \
+    '$1 == s && (on == "  " || index(on, " " $3 " ")) { n++ } END { print n + 0 }')
   [ "${HIDE_EMPTY:-0}" = 1 ] && [ "$has_windows" = 0 ] && [ "$sid" != "$FOCUSED" ] && continue
   slot=$((slot + 1))
   [ "$slot" -gt "${SLOTS:-12}" ] && break
@@ -63,7 +106,9 @@ while IFS='|' read -r sid display; do
   if [ "$sid" = "$FOCUSED" ]; then
     args+=(--set "$item" background.drawing=on icon.color=$DARK label.color=$DARK)
   else
-    args+=(--set "$item" background.drawing=off icon.color=$GREY label.color=$FG)
+    label=$FG
+    [ "$has_windows" != 0 ] && [ "$shown" = 0 ] && label=$FADED
+    args+=(--set "$item" background.drawing=off icon.color=$GREY label.color=$label)
   fi
   if [ -z "$icons" ]; then
     args+=(--set "$item" label.drawing=off icon.padding_right=8)

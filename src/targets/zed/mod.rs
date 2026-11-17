@@ -39,6 +39,7 @@ pub const TARGET: Target = Target {
         read,
         write,
         prepare: Some(prepare),
+        create: false,
     }),
     installed: |paths| {
         super::has_app(paths, "Zed.app")
@@ -48,6 +49,13 @@ pub const TARGET: Target = Target {
     reload,
     unload: Some(|_| Outcome::Done("switches back by itself".into())),
     doctor,
+    verify: |paths, _| {
+        Some(crate::verify::same_file(
+            &theme_file(paths),
+            &paths.current().join("zed.json"),
+            "Zed's copy (themes/palette.json)",
+        ))
+    },
     platforms: Platforms::Mac,
     ..BASE
 };
@@ -184,156 +192,14 @@ fn doctor(paths: &Paths) -> Vec<Note> {
 
 // ---------------------------------------------------------------- settings.json
 
-/// A small reader for JSON with comments (Zed's settings.json): just enough
-/// to find a top-level key's value without touching anything else.
-struct Scan<'a> {
-    b: &'a [u8],
-}
-
-impl Scan<'_> {
-    /// Skip spaces, `// …` and `/* … */`.
-    fn blank(&self, mut i: usize) -> usize {
-        loop {
-            while i < self.b.len() && self.b[i].is_ascii_whitespace() {
-                i += 1;
-            }
-            match self.b.get(i..i + 2) {
-                Some(b"//") => {
-                    while i < self.b.len() && self.b[i] != b'\n' {
-                        i += 1;
-                    }
-                }
-                Some(b"/*") => {
-                    i += 2;
-                    while i < self.b.len() && self.b.get(i..i + 2) != Some(b"*/") {
-                        i += 1;
-                    }
-                    i = (i + 2).min(self.b.len());
-                }
-                _ => return i,
-            }
-        }
-    }
-
-    /// `i` at an opening quote → just past the closing one.
-    fn string(&self, mut i: usize) -> Option<usize> {
-        i += 1;
-        while i < self.b.len() {
-            match self.b[i] {
-                b'\\' => i += 2,
-                b'"' => return Some(i + 1),
-                _ => i += 1,
-            }
-        }
-        None
-    }
-
-    /// `i` at the start of a value → just past its end.
-    fn value(&self, i: usize) -> Option<usize> {
-        match *self.b.get(i)? {
-            b'"' => self.string(i),
-            b'{' | b'[' => {
-                let mut depth = 0usize;
-                let mut j = i;
-                while j < self.b.len() {
-                    match self.b[j] {
-                        b'"' => {
-                            j = self.string(j)?;
-                            continue;
-                        }
-                        b'/' if matches!(self.b.get(j + 1), Some(b'/' | b'*')) => {
-                            j = self.blank(j);
-                            continue;
-                        }
-                        b'{' | b'[' => depth += 1,
-                        b'}' | b']' => {
-                            depth -= 1;
-                            if depth == 0 {
-                                return Some(j + 1);
-                            }
-                        }
-                        _ => {}
-                    }
-                    j += 1;
-                }
-                None
-            }
-            _ => {
-                let mut j = i;
-                while j < self.b.len() && !b",}]\n/".contains(&self.b[j]) {
-                    j += 1;
-                }
-                let end = self.b[i..j]
-                    .iter()
-                    .rposition(|c| !c.is_ascii_whitespace())?;
-                Some(i + end + 1)
-            }
-        }
-    }
-}
-
-/// The top-level `"theme"` entry: (where its key starts, value start, value end).
-fn theme_span(text: &str) -> Option<(usize, usize, usize)> {
-    let s = Scan { b: text.as_bytes() };
-    let mut i = s.blank(0);
-    if s.b.get(i) != Some(&b'{') {
-        return None;
-    }
-    i += 1;
-    loop {
-        i = s.blank(i);
-        if s.b.get(i)? != &b'"' {
-            return None;
-        }
-        let key_start = i;
-        let key_end = s.string(i)?;
-        i = s.blank(key_end);
-        if s.b.get(i)? != &b':' {
-            return None;
-        }
-        let start = s.blank(i + 1);
-        let end = s.value(start)?;
-        if &text[key_start..key_end] == "\"theme\"" {
-            return Some((key_start, start, end));
-        }
-        i = s.blank(end);
-        match s.b.get(i)? {
-            b',' => i += 1,
-            _ => return None,
-        }
-    }
-}
-
 fn read(text: &str) -> Option<String> {
-    let (_, start, end) = theme_span(text)?;
-    Some(text[start..end].to_string())
+    crate::jsonc::read(text, "theme")
 }
 
 /// Swap the value (`Some`, JSON text), add the setting at the top, or
 /// (`None`) delete the line Palette added.
 fn write(text: &str, value: Option<&str>) -> String {
-    match (value, theme_span(text)) {
-        (Some(v), Some((_, start, end))) => format!("{}{v}{}", &text[..start], &text[end..]),
-        (Some(v), None) => match text.find('{') {
-            Some(brace) => {
-                let rest = &text[brace + 1..];
-                let next = &rest[Scan { b: rest.as_bytes() }.blank(0)..];
-                let comma = if next.is_empty() || next.starts_with('}') {
-                    ""
-                } else {
-                    ","
-                };
-                format!("{}\n    \"theme\": {v}{comma}{rest}", &text[..=brace])
-            }
-            None => format!("{{\n    \"theme\": {v}\n}}\n"),
-        },
-        (None, Some((key, _, end))) => {
-            let line_start = text[..key].rfind('\n').map_or(0, |i| i + 1);
-            let line_end = text[end..].find('\n').map_or(text.len(), |i| end + i + 1);
-            format!("{}{}", &text[..line_start], &text[line_end..])
-        }
-        (None, None) => text.to_string(),
-    }
+    crate::jsonc::write(text, "theme", value)
 }
 
 #[cfg(test)]

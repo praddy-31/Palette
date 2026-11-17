@@ -34,6 +34,7 @@ pub const TARGET: Target = Target {
         read,
         write,
         prepare: Some(prepare),
+        create: false,
     }),
     installed: |paths| super::has_app(paths, "Obsidian.app"),
     reload,

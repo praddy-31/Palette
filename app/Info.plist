@@ -7,5 +7,8 @@
        without it, each link turned Palette into a Dock app. -->
   <key>LSUIElement</key>
   <true/>
+  <!-- The bar's beat lines (ROADMAP 20): Palette's helper taps what the Mac plays. -->
+  <key>NSAudioCaptureUsageDescription</key>
+  <string>Palette listens to what your Mac plays (never the microphone) to move the beat lines in your bar with the music. Nothing is recorded or stored.</string>
 </dict>
 </plist>

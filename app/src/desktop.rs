@@ -79,20 +79,22 @@ pub(crate) async fn desktop_set(
 ) -> Result<DesktopApplied, AppError> {
     let t = tool(&name)?;
     let value = to_toml(settings)?;
-    tauri::async_runtime::spawn_blocking(move || {
+    let done = tauri::async_runtime::spawn_blocking(move || {
         palette::desktop::set(&paths()?, t, value)
             .map(desktop_applied)
             .map_err(err)
     })
     .await
-    .map_err(err)?
+    .map_err(err)?;
+    crate::beats::sync_soon();
+    done
 }
 
 /// "Let Palette manage it" (`manage`) or "Give it back" (`release`).
 #[tauri::command]
 pub(crate) async fn desktop_own(name: String, manage: bool) -> Result<DesktopApplied, AppError> {
     let t = tool(&name)?;
-    tauri::async_runtime::spawn_blocking(move || {
+    let done = tauri::async_runtime::spawn_blocking(move || {
         let paths = paths()?;
         let done = if manage {
             palette::desktop::manage(&paths, t)
@@ -102,7 +104,9 @@ pub(crate) async fn desktop_own(name: String, manage: bool) -> Result<DesktopApp
         done.map(desktop_applied).map_err(err)
     })
     .await
-    .map_err(err)?
+    .map_err(err)??;
+    crate::beats::sync_soon();
+    Ok(done)
 }
 
 /// Go back to a backup, by its name in `history`.
@@ -112,13 +116,15 @@ pub(crate) async fn desktop_restore(
     backup: String,
 ) -> Result<DesktopApplied, AppError> {
     let t = tool(&name)?;
-    tauri::async_runtime::spawn_blocking(move || {
+    let done = tauri::async_runtime::spawn_blocking(move || {
         palette::desktop::restore(&paths()?, t, &backup)
             .map(desktop_applied)
             .map_err(err)
     })
     .await
-    .map_err(err)?
+    .map_err(err)??;
+    crate::beats::sync_soon();
+    Ok(done)
 }
 
 /// Installed font families, for the bar's font.
@@ -227,6 +233,176 @@ pub(crate) fn bar_move_pill(
     };
     let at = bar.move_pill(from, place).map_err(err)?;
     Ok((serde_json::to_value(&bar).map_err(err)?, at))
+}
+
+/// The Bar page's unsaved settings as the core's bar (JSON `null`s left out).
+fn bar_of(settings: serde_json::Value) -> Result<palette::desktop::bar::Bar, AppError> {
+    to_toml(settings)?.try_into().map_err(err)
+}
+
+fn bar_json(bar: &palette::desktop::bar::Bar) -> Result<serde_json::Value, AppError> {
+    serde_json::to_value(bar).map_err(err)
+}
+
+/// For the Bar page's App icons (IDEAS 37b): the icon font's glyph names, the apps open now
+/// (AeroSpace's names), the installed apps, and what the map gives each of those (and each
+/// app with your icon). Empty when there's no map / no AeroSpace.
+#[tauri::command]
+pub(crate) async fn bar_icon_choices() -> Result<serde_json::Value, AppError> {
+    use palette::desktop::bar;
+    tauri::async_runtime::spawn_blocking(|| {
+        let paths = paths()?;
+        let open = bar::open_apps(&paths);
+        let installed = bar::installed_apps(&paths);
+        let yours = palette::desktop::get(&paths, palette::desktop::Tool::Bar)
+            .ok()
+            .and_then(|v| {
+                Some(
+                    v.get("icons")?
+                        .as_table()?
+                        .keys()
+                        .cloned()
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .unwrap_or_default();
+        let mut all: Vec<String> = open
+            .iter()
+            .chain(&installed)
+            .chain(&yours)
+            .cloned()
+            .collect();
+        all.sort();
+        all.dedup();
+        Ok(serde_json::json!({
+            "glyphs": bar::glyphs(&paths),
+            "open": open,
+            "installed": installed,
+            "map": bar::map_icons(&paths, &all),
+        }))
+    })
+    .await
+    .map_err(err)?
+}
+
+/// Ready pills, whole layouts and looks for the Bar page's tray (18b, S8).
+#[tauri::command]
+pub(crate) fn bar_presets() -> serde_json::Value {
+    use palette::desktop::bar::presets::{LOOKS, PRESETS};
+    serde_json::json!({ "presets": PRESETS, "looks": LOOKS })
+}
+
+/// Add a ready pill (or a whole layout) to the bar being edited; Apply saves it. Returns the
+/// settings and what was added (the new pill's index, items left out).
+#[tauri::command]
+pub(crate) fn bar_add_preset(
+    settings: serde_json::Value,
+    id: String,
+    side: String,
+) -> Result<(serde_json::Value, palette::desktop::bar::presets::Added), AppError> {
+    let paths = paths()?;
+    let mut bar = bar_of(settings)?;
+    let have = |k: &str| palette::desktop::bar::live::have(&paths, k);
+    let added = palette::desktop::bar::presets::add(&mut bar, &id, &side, &have).map_err(err)?;
+    Ok((bar_json(&bar)?, added))
+}
+
+/// The bar being edited, drawn in a ready look (items stay).
+#[tauri::command]
+pub(crate) fn bar_look(
+    settings: serde_json::Value,
+    id: String,
+) -> Result<serde_json::Value, AppError> {
+    let bar = bar_of(settings)?;
+    let menu = palette::system::menu_bar_height();
+    bar_json(&palette::desktop::bar::presets::with_look(&bar, &id, menu).map_err(err)?)
+}
+
+/// Split (before item `at`), merge (with the next pill) or duplicate pill `pill` in the bar
+/// being edited (S7). Returns the settings and the pill to select.
+#[tauri::command]
+pub(crate) fn bar_pill_action(
+    settings: serde_json::Value,
+    action: String,
+    pill: usize,
+    at: Option<usize>,
+) -> Result<(serde_json::Value, usize), AppError> {
+    let mut bar = bar_of(settings)?;
+    let to = match action.as_str() {
+        "split" => bar.split_pill(pill, at.unwrap_or(1)),
+        "merge" => bar.merge_pill(pill),
+        "duplicate" => bar.duplicate_pill(pill),
+        other => return Err(format!("no pill action `{other}`").into()),
+    }
+    .map_err(err)?;
+    Ok((bar_json(&bar)?, to))
+}
+
+/// What the running bar shows now, by item (S5), and why an item can't work here (S6).
+#[tauri::command]
+pub(crate) async fn bar_live(settings: serde_json::Value) -> Result<serde_json::Value, AppError> {
+    let bar = bar_of(settings)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let paths = paths()?;
+        Ok(serde_json::json!({
+            "values": palette::desktop::bar::live::values(&paths, &bar),
+            "needs": palette::desktop::bar::live::needs(&paths),
+        }))
+    })
+    .await
+    .map_err(err)?
+}
+
+/// The saved bars (18c), the one in use marked.
+#[tauri::command]
+pub(crate) fn bar_saved() -> Result<Vec<palette::desktop::bar::saved::Saved>, AppError> {
+    Ok(palette::desktop::bar::saved::list(&paths()?))
+}
+
+/// Save the bar as it is (the applied one) under a new name; it's then the one in use.
+#[tauri::command]
+/// `settings`: the page's unapplied changes, applied into the new bar only.
+pub(crate) fn bar_save_as(
+    app: AppHandle,
+    name: String,
+    settings: Option<serde_json::Value>,
+) -> Result<String, AppError> {
+    let edited = settings.map(bar_of).transpose()?;
+    let name = palette::desktop::bar::saved::save_as(&paths()?, &name, edited).map_err(err)?;
+    crate::tray::refresh(&app);
+    Ok(name)
+}
+
+/// Switch to a saved bar: written and reloaded, a backup first.
+#[tauri::command]
+pub(crate) async fn bar_use(app: AppHandle, name: String) -> Result<DesktopApplied, AppError> {
+    let a = tauri::async_runtime::spawn_blocking(move || {
+        palette::desktop::bar::saved::use_bar(&paths()?, &name).map_err(err)
+    })
+    .await
+    .map_err(err)??;
+    crate::tray::refresh(&app);
+    crate::beats::sync_soon();
+    let _ = app.emit("bar-changed", ());
+    Ok(desktop_applied(a))
+}
+
+#[tauri::command]
+pub(crate) fn bar_rename_saved(
+    app: AppHandle,
+    name: String,
+    new: String,
+) -> Result<String, AppError> {
+    let new = palette::desktop::bar::saved::rename(&paths()?, &name, &new).map_err(err)?;
+    crate::tray::refresh(&app);
+    Ok(new)
+}
+
+#[tauri::command]
+pub(crate) fn bar_delete_saved(app: AppHandle, name: String) -> Result<String, AppError> {
+    let name = palette::desktop::bar::saved::delete(&paths()?, &name).map_err(err)?;
+    crate::tray::refresh(&app);
+    Ok(name)
 }
 
 /// What can go in a bar pill.

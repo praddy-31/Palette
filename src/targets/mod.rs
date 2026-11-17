@@ -19,14 +19,19 @@ mod ghostty;
 mod gnome;
 mod gnome_terminal;
 mod habit_tracker;
+mod herdr;
+pub(crate) mod herdr_app;
 mod kde;
 mod kitty;
 mod konsole;
 mod lazygit;
+mod micro;
 mod neovim;
 mod niri;
 mod noctalia;
 mod obsidian;
+mod orca;
+mod rex;
 mod shell;
 mod sketchybar;
 mod sketchybar_item;
@@ -62,6 +67,8 @@ pub struct Target {
     pub env: fn(&Paths) -> Vec<String>,
     /// Extra `palette doctor` findings, beyond wired / not wired.
     pub doctor: fn(&Paths) -> Vec<Note>,
+    /// `palette verify`: read back what the running app took (`None`: nothing to read).
+    pub verify: fn(&Paths, &crate::theme::Theme) -> Option<Outcome>,
     /// Where the app exists. Targets for the other system are left out of
     /// everything (`all`): list, doctor, rendering, the app.
     pub platforms: Platforms,
@@ -145,6 +152,7 @@ pub const BASE: Target = Target {
     unload: None,
     env: |_| Vec::new(),
     doctor: |_| Vec::new(),
+    verify: |_, _| None,
     platforms: Platforms::Both,
 };
 
@@ -173,6 +181,11 @@ pub const ALL: &[Target] = &[
     dispatch::TARGET,
     easyplots::TARGET,
     wezterm::TARGET,
+    rex::TARGET,
+    herdr::TARGET,
+    herdr_app::TARGET,
+    orca::TARGET,
+    micro::TARGET,
     foot::TARGET,
     konsole::TARGET,
     gnome_terminal::TARGET,
@@ -208,6 +221,34 @@ pub fn has_app(paths: &Paths, bundle: &str) -> bool {
     }
     std::path::Path::new("/Applications").join(bundle).is_dir()
         || paths.home().join("Applications").join(bundle).is_dir()
+}
+
+/// Shared helper for apps that load themes only from their own folder (Herdr,
+/// micro): copy `current/<generated>` to `to` (temp file + rename, so the app never
+/// reads half a file), unless `to` holds something that isn't Palette's (`ours`
+/// says). A copy, not a link: an app watching its folder misses changes behind a link.
+pub fn copy_ours(
+    paths: &Paths,
+    generated: &str,
+    to: &std::path::Path,
+    ours: impl Fn(&str) -> bool,
+) -> Result<(), String> {
+    let text = std::fs::read_to_string(paths.current().join(generated))
+        .map_err(|e| format!("set a theme first ({e})"))?;
+    if let Ok(existing) = std::fs::read_to_string(to)
+        && !ours(&existing)
+    {
+        return Err(format!(
+            "{} already exists and isn't Palette's; rename it, then run `palette init` again",
+            to.display()
+        ));
+    }
+    let dir = to.parent().ok_or("no folder")?;
+    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    let name = to.file_name().unwrap_or_default().to_string_lossy();
+    let temp = dir.join(format!(".{name}.partial"));
+    std::fs::write(&temp, &text).map_err(|e| e.to_string())?;
+    std::fs::rename(&temp, to).map_err(|e| e.to_string())
 }
 
 fn has_launcher(paths: &Paths, name: &str) -> bool {

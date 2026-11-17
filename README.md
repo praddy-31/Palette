@@ -1,8 +1,20 @@
 # Palette
 
-One click, one hotkey or one command restyles your whole Mac desktop from a single palette file.
+**A theme switcher for your whole Mac.** One click, one hotkey or one command restyles the
+bar, window borders, terminals, editors, command-line tools, wallpaper and light or dark
+mode together, from a single palette file. In the spirit of Omarchy, for macOS.
 
-![The quick switcher: the bar, wallpaper and light or dark mode change together](docs/media/hero.gif)
+<p align="center">
+  <img src="docs/media/hero.gif" width="760" alt="The quick switcher: the bar, wallpaper and light or dark mode change together">
+</p>
+
+## Why
+
+A good-looking Mac setup is a dozen config files, each with its own colour syntax: the bar,
+the borders, three terminals, two editors, btop, lazygit, the prompt. Changing the theme
+means editing all of them, and they drift apart. Palette keeps one `colors.toml` per theme
+and writes every app's colours from it, so a switch is one keypress and every app agrees.
+Your own configs stay yours: each gets one line that loads Palette's file.
 
 Palette is an open-source, Omarchy-style theme switcher for macOS. Pick a theme and your
 bar, window borders, terminals, editors, command-line tools, wallpaper and light or dark
@@ -19,19 +31,48 @@ plain `colors.toml` files, and Omarchy's community themes work as they are.
   first, and can take it out again. Nothing else in your files is rewritten.
 - **Private and light:** no account, no telemetry, no background service; network only
   when you ask it to download something. About 65 MB at rest.
+- **Fonts too:** a font size and family per terminal and editor, from the same place
+  (Settings → Apps, or `palette font ghostty --size 14`).
 
-macOS only for now (Apple silicon). Linux support is being worked on.
+macOS only for now (Apple silicon). Linux support is coming soon.
+
+## How a switch works
+
+```mermaid
+flowchart LR
+  T["themes/nord/<br>colors.toml"] --> F["readability fixes<br>+ your colour edits"]
+  F --> R["one template per app<br>(Ghostty, SketchyBar, Zed…)"]
+  R --> N["new folder<br>generations/…"]
+  N -->|"one symlink swap"| C["~/.config/palette/current/"]
+  C --> A["each app reloads<br>(only the ones that changed)"]
+```
+
+1. **One theme file.** `colors.toml` holds about 25 named colours (background, text,
+   accent, selection, the terminal colours). Omarchy's themes use the same format.
+2. **Made readable.** Palette checks the colours and fixes the ones that are hard to read,
+   in lightness only, and lays your own edits on top.
+3. **Written for every app.** One small template per app turns the colours into that app's
+   syntax: `ghostty.conf`, `sketchybarrc` colours, a VSCodium theme, a Zed theme, and so on.
+4. **Swapped in one step.** Everything is written into a fresh folder, then the `current`
+   link points at it, so no app ever reads a half-written file. Undo points it back.
+5. **Reloaded.** Each app picks up its file: SketchyBar and JankyBorders by command,
+   Ghostty and kitty by signal, editors by watching the file. Apps whose file didn't change
+   are left alone.
+
+Your configs get one line, such as `config-file = ?~/.config/palette/current/ghostty.conf`,
+or for apps without includes (Zed, VSCodium, micro, Herdr) one setting that names Palette's theme.
+Rex and Orca take Palette's theme through their own commands on every switch.
 
 ## What it themes
 
-22 apps and parts of the desktop. `palette doctor` shows which ones are installed and
+28 apps and parts of the desktop. `palette doctor` shows which ones are installed and
 wired on your Mac; switch any of them off with `palette apps off <name>` or in Settings → Apps.
 
 | | |
 |---|---|
 | **Desktop** | SketchyBar (bar colours, plus a theme pill you can click or scroll), JankyBorders, the wallpaper, macOS light or dark mode |
-| **Terminals** | Ghostty, kitty, Alacritty, WezTerm, tmux |
-| **Editors** | VSCodium, Zed, Neovim, Obsidian |
+| **Terminals** | Ghostty, kitty, Alacritty, WezTerm, Rex, tmux, herdr (and the Herdr app) |
+| **Editors** | VSCodium, Zed, Orca, Neovim, micro, Obsidian |
 | **Command-line tools** | Starship (merged with your own `starship.toml`), btop, fzf, bat, lazygit, and a small shell file that loads their colours in new terminals |
 | **Apps** | Habit Tracker, Chess Review, Dispatch, EasyPlots (each follows its own colours file) |
 
@@ -42,11 +83,16 @@ glow, your Starship prompt, and the Dock and menu bar (see *Desktop pages* below
 
 ## Install
 
+Apple silicon Mac, macOS 13 (Ventura) or later.
+
 ```sh
+brew trust --cask praddy-31/tap/palette     # Homebrew 7 asks you to trust casks from other taps once
 brew install --cask praddy-31/tap/palette
 ```
 
-This installs Palette.app and the `palette` command.
+This installs Palette.app and the `palette` command. Palette is ad-hoc signed, not
+notarised by Apple (that needs a paid developer account). If macOS still refuses to open
+it, allow it in **System Settings → Privacy & Security → Open Anyway**.
 
 ### From the DMG
 
@@ -84,7 +130,8 @@ palette init
 `palette init` adds one import line to each app's config so the app loads Palette's file.
 Before it changes anything it backs up the config to `~/.config/palette/backup/<time>/`
 (the last 5 are kept). `palette init --remove` takes Palette's lines back out, and
-`palette doctor` checks that each app is installed, wired and up to date.
+`palette doctor` checks that each app is installed, wired and up to date, and
+`palette verify` reads back what the running apps actually show.
 
 ## Switching themes
 
@@ -103,6 +150,9 @@ Before it changes anything it backs up the config to `~/.config/palette/backup/<
   colour name (`purple`), in the app or with `palette list warm dark`.
 - **Favourites and recents.** Star up to ten themes; `palette next` can step through only
   those, and scrolling on the bar's theme pill switches theme (`palette fav scroll on`).
+- **Pin a theme to one app.** Keep Ghostty on Tokyo Night (or the bar on Snow Black) whatever
+  you switch to: Settings → Apps, or `palette pin ghostty tokyo-night` (`--clear` to let it
+  follow again). Light/dark and the wallpaper always follow the main theme.
 - **Day and night.** Pick a light and a dark theme and a city; Palette switches at sunrise
   and sunset, with no location services and no network (`palette schedule`).
 - **Command line.**
@@ -125,6 +175,7 @@ Settings → Get themes lists Omarchy's community themes (offline, searchable by
 ```sh
 palette catalog warm          # the offline list, narrowed by look
 palette install aura          # a name from the catalogue
+palette install rex           # the themes that come with the Rex app, if you have it
 palette install https://github.com/someone/their-theme
 palette update                # download installed themes again
 palette remove aura
@@ -132,6 +183,9 @@ palette catalog --sheet ~/Desktop/themes.html   # every catalogue theme on one o
 ```
 
 `palette new my-theme --from-wallpaper photo.jpg` makes a whole theme from a picture.
+
+A theme whose selection is as bright as its text (meant for inverted selected text) is
+imported with a grey selection instead, so selected text stays readable in every app.
 
 ## Wallpapers
 
@@ -165,6 +219,9 @@ for the library, links and how recolouring works.
 - **Your own colours.** Change any colour in Settings → Colours or with
   `palette colours --set accent=#7aa2f7`. Edits sit on top of the theme (`edits.toml`), so
   updates never overwrite them, and `palette colours --reset` brings the original back.
+- **Selections per app.** Terminals, code in editors and lists each get a selection that
+  keeps their text readable, so they can differ. Settings → Colours shows the one each app
+  really gets, and *Editor selection* is a colour you can set yourself.
 - **Monochrome themes** get evenly spaced greys and a faint tint of their hue, so terminal
   colours stay apart.
 
@@ -174,12 +231,28 @@ for the library, links and how recolouring works.
 
 - **Window glass.** Ghostty, kitty, Alacritty, WezTerm, Dispatch, EasyPlots and the Habit
   Tracker can be solid, blurred or clear at the strength you pick (Ghostty also has macOS 26's
-  own glass). Zed gets its own see-through theme. Settings → Apps, or the same words in the
-  terminal: `palette glass ghostty clear --strength 20`, `palette zed blurred --strength 40`.
+  own glass). Zed gets its own see-through theme, and so does the Herdr app (`palette glass
+  herdr-app clear --frost on`: Herdr then uses a copy of your layout with its blur on, as its
+  own layouts can't be changed; it lasts across restarts). Settings →
+  Apps, or the same words in the terminal: `palette glass ghostty clear --strength 20`, `palette zed blurred --strength 40`.
   By default Palette leaves each terminal's own setting alone (`palette glass ghostty own`).
 - **Performance mode.** One click (menu bar, Settings, or `palette performance on`) makes
   every glass window solid and the bar and borders plainer, to spare the GPU and battery.
   Click again and every look comes back.
+
+## Fonts
+
+Settings → Apps → *app* → Font sets a size and family for Ghostty, kitty, Alacritty,
+WezTerm, Zed and VSCodium; empty means your own. Terminals get the lines in Palette's file
+for them, which wins over yours. Zed and VSCodium only read fonts from their own
+`settings.json`, so Palette changes just that key there, backs the file up first, and puts
+your value back when you choose your own font again.
+
+```sh
+palette font ghostty --size 14 --family "JetBrainsMono Nerd Font Mono"
+palette font zed --size 15
+palette font ghostty --clear       # back to your own
+```
 
 ## Desktop pages (optional)
 
@@ -193,6 +266,13 @@ change is backed up first, and **Give it back** restores yours. The Prompt page 
 the keys it shows in `starship.toml`; the Dock & menu bar page changes macOS settings, and
 switching an option back undoes it. **Match the menu bar** sizes the bar, its pills and text to
 your Mac's menu bar strip (`palette desktop bar fit`).
+
+**App icons on the bar.** The workspace pills and the active-app pill draw each app as a
+glyph from [sketchybar-app-font](https://github.com/kvndrsslr/sketchybar-app-font)
+(`brew install --cask font-sketchybar-app-font`, plus its `icon_map.sh` in
+`~/.config/sketchybar/helpers/`); without it they show `•`. Palette ships no icons of its own.
+Choose an app's icon yourself on Settings → Bar → Text and icons → App icons, or with
+`palette desktop bar icon Ollama :ollama:` (a glyph name or up to 4 characters).
 
 **The top gap on more than one display.** AeroSpace counts the top gap from the area macOS
 lets windows use. On a MacBook screen with a notch, macOS always keeps the menu bar's strip
@@ -224,6 +304,22 @@ backing up whatever it replaces (`--dry-run` shows what would change first). Add
 `--library` to take your wallpaper library along too. Settings → Move to another Mac does
 the same. Nothing leaves your Mac: you carry the folder yourself.
 
+If the configs belong to apps the new Mac doesn't have yet (SketchyBar, AeroSpace, kitty…),
+the import lists them with the Homebrew commands to copy, in an order that works when
+pasted as one block:
+
+```text
+Not on this Mac yet: SketchyBar, AeroSpace
+To get them, copy these into a terminal (Palette runs none of them):
+  brew tap FelixKratz/formulae
+  brew install sketchybar
+  brew install --cask nikitabobko/tap/aerospace
+  brew services start sketchybar
+```
+
+Palette edits configs and installs nothing; the configs are in place either way, and each
+app uses its own once you install it.
+
 ## Settings from the keyboard
 
 Settings works without the mouse: 1-9 and 0 open the first ten tabs, W B J P D the desktop pages
@@ -238,18 +334,24 @@ the main ones in view.
 The app's windows are web pages, so Settings → General → Windows chooses how long they
 stay loaded. *Keep ready* opens everything at once. *Load on demand* builds the picker and
 Settings when you open them and frees them a few seconds after they close. *Everything on
-demand* frees the quick switcher too: about 65 MB at rest on an M4.
+demand* frees the quick switcher too: about 65 MB at rest on an M4 chip.
 `palette ui --windows ready|on-demand|all-on-demand`.
 
 ## Safety
 
-- **Import, don't overwrite.** Palette writes only inside `~/.config/palette/`. Your own
-  configs get one marked import line, added by `palette init` and removed by
+- **Import, don't overwrite.** Palette writes its files inside `~/.config/palette/`, plus a
+  theme file in the folder of the apps that only read themes from there (Zed's `themes/`, the
+  Herdr app's `themes/`, VSCodium's Palette extension), each its own file, never yours. Your
+  own configs get one marked import line, added by `palette init` and removed by
   `palette init --remove`. Nothing else in them is rewritten. The one exception is opt-in,
   per tool: after **Let Palette manage** on a desktop page, Palette writes that tool's
   config (sketchybarrc, bordersrc, aerospace.toml key by key), backing it up before every
   change; **Give it back** restores your original. The Prompt page edits the keys it shows
-  in your `starship.toml`, the rest of the file stays as written.
+  in your `starship.toml`, the rest of the file stays as written. A font you set for Zed or
+  VSCodium changes only that key in its `settings.json` (backed up first), and choosing your
+  own font puts your value back.
+- **Installs nothing.** Palette never runs Homebrew or any installer. Get the tools and
+  imports show the commands; you copy them into a terminal yourself.
 - **Atomic switches.** Each switch renders into a new folder and repoints the `current`
   symlink in one step, so an app never reads a half-written file.
 - **Themes are data.** Nothing in a theme folder is ever run. Files that could run
@@ -301,6 +403,8 @@ files:
 
 - [SketchyBar](https://github.com/FelixKratz/SketchyBar) and
   [JankyBorders](https://github.com/FelixKratz/JankyBorders) by Felix Kratz
+- [sketchybar-app-font](https://github.com/kvndrsslr/sketchybar-app-font) by kvndrsslr and its
+  contributors: the bar's app icons and their `icon_map.sh`
 - [AeroSpace](https://github.com/nikitabobko/AeroSpace) by Nikita Bobko
 - [Starship](https://github.com/starship/starship) by the Starship contributors
 - [gowall](https://github.com/Achno/gowall) by Achno (optional recolouring engine)

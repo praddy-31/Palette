@@ -35,6 +35,9 @@ pub struct Settings {
     /// Terminal windows (`palette glass`): app name → its glass. Apps not
     /// listed keep their own setting ([`WindowGlass::default`]).
     pub glass: BTreeMap<String, WindowGlass>,
+    /// Font size and family per app (`palette font`, ROADMAP 22b): app → its font. Apps not
+    /// listed, and empty parts, keep your own.
+    pub fonts: BTreeMap<String, AppFont>,
     /// Day and night themes on a schedule (`palette schedule`).
     pub schedule: crate::schedule::Schedule,
     /// Favourite themes, in the order added (at most ten; `palette fav`).
@@ -47,6 +50,8 @@ pub struct Settings {
     pub windows: AppWindows,
     /// What a click on the menu bar icon (and the bar's theme pill) opens (`palette ui --click`).
     pub menu_click: MenuClick,
+    /// What opening Palette again shows (Finder, Spotlight, `open -a Palette`) while it runs.
+    pub reopen: Reopen,
     /// One line per switch in `palette.log` (`palette log`); off by default.
     pub log: bool,
     /// Windows on demand: also close Settings after 10 minutes without focus, even
@@ -57,6 +62,15 @@ pub struct Settings {
     /// Glass lift set by hand, per theme (F2, Settings → My themes): 0 = off, 1-100 = that
     /// much stronger than Auto (`glass::Lift`). A theme not listed lifts on Auto.
     pub glass_lift: BTreeMap<String, u8>,
+    /// Display names (ROADMAP 17b, `palette rename`): theme folder → the name shown. The
+    /// folder keeps its name, so updates, favourites, recents and edits keep working.
+    pub names: BTreeMap<String, String>,
+    /// Pinned apps (ROADMAP 24, `palette pin`): target name → the theme it keeps whatever
+    /// the main theme is. Light/dark and the wallpaper always follow the main theme.
+    pub pins: BTreeMap<String, String>,
+    /// Herdr's frost (owner, 2026-11-17): the layout you used before Palette switched Herdr to
+    /// its frosted copy (`palette-glass`); `None` when Frost is off.
+    pub herdr_frost: Option<String>,
     /// Scrolling on the bar's theme pill switches theme (on by default; `palette fav scroll`).
     pub bar_scroll: bool,
     /// Monochrome themes: spaced greys (on by default) and a theme-hue tint (off).
@@ -97,6 +111,35 @@ impl AppWindows {
             "on-demand" | "ondemand" | "demand" | "lazy" => Ok(Self::OnDemand),
             "all-on-demand" | "all" | "lightest" => Ok(Self::AllOnDemand),
             other => bail!("windows is ready, on-demand or all-on-demand (not `{other}`)"),
+        }
+    }
+}
+
+/// What opening Palette again shows while it runs (ROADMAP 17c, owner: like EasyPlots, where
+/// the first open starts it and the next ones open what you choose).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Reopen {
+    #[default]
+    Picker,
+    Settings,
+    Quick,
+}
+
+impl Reopen {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Picker => "picker",
+            Self::Settings => "settings",
+            Self::Quick => "quick-switcher",
+        }
+    }
+
+    pub fn parse(s: &str) -> Result<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "picker" | "grid" => Ok(Self::Picker),
+            "settings" | "prefs" => Ok(Self::Settings),
+            "quick-switcher" | "quick" | "overlay" | "switcher" => Ok(Self::Quick),
+            other => bail!("reopen is picker, settings or quick-switcher (not `{other}`)"),
         }
     }
 }
@@ -145,7 +188,8 @@ pub struct Performance {
     pub bar: bool,
     /// JankyBorders plain: no glow, normal resolution (hidpi off), when Palette manages it.
     pub borders: bool,
-    /// The bar's stats pill every 30 s instead of every few seconds.
+    /// The bar slower: stats [`PERFORMANCE_STATS_TIMES`] as rarely, every other timed pill
+    /// [`PERFORMANCE_PILL_TIMES`], never the clock (ROADMAP 17a; saved key `stats`).
     pub stats: bool,
 }
 
@@ -161,8 +205,12 @@ impl Default for Performance {
     }
 }
 
-/// How often the stats pill updates in Performance mode, at most.
-pub const PERFORMANCE_STATS_EVERY: u32 = 30;
+/// Performance mode's bar (owner, 2026-11-10): fixed multiples, not a setting. Stats update
+/// 10× as rarely (3 s → 30 s), every other timed pill 3× (at most [`PERFORMANCE_MAX_EVERY`]);
+/// the clock never slows, as its minute would be wrong.
+pub const PERFORMANCE_STATS_TIMES: u32 = 10;
+pub const PERFORMANCE_PILL_TIMES: u32 = 3;
+pub const PERFORMANCE_MAX_EVERY: u32 = 3600;
 
 impl Performance {
     pub fn glass_now(&self) -> bool {
@@ -218,18 +266,23 @@ impl Default for Settings {
             zed_glass: Glass::Blurred,
             zed_strength: 50,
             glass: BTreeMap::new(),
+            fonts: BTreeMap::new(),
             schedule: Default::default(),
             favourites: Vec::new(),
             next_cycles: crate::favourites::Cycle::All,
             performance: Performance::default(),
             windows: AppWindows::Ready,
             menu_click: MenuClick::Picker,
+            reopen: Reopen::Picker,
             log: false,
             close_idle_settings: false,
             readability: crate::normalise::Level::Minimal,
             monochrome: crate::monochrome::Mono::default(),
             bar_scroll: true,
             glass_lift: BTreeMap::new(),
+            names: BTreeMap::new(),
+            pins: BTreeMap::new(),
+            herdr_frost: None,
             original_colours: BTreeSet::new(),
         }
     }
@@ -258,7 +311,16 @@ impl Settings {
 
     /// A terminal's window glass as chosen (its own setting unless chosen in Palette).
     pub fn glass_saved(&self, app: &str) -> WindowGlass {
-        self.glass.get(app).copied().unwrap_or_default()
+        let g = self.glass.get(app).copied().unwrap_or_default();
+        if app == "palette" && g.kind == TermGlass::Own {
+            // Solid until you choose: the look Palette's windows always had.
+            WindowGlass {
+                kind: TermGlass::Solid,
+                ..g
+            }
+        } else {
+            g
+        }
     }
 
     /// Zed's window as Palette writes it now (solid in Performance mode).
@@ -334,6 +396,7 @@ pub fn load(paths: &Paths) -> Result<Settings> {
         .and_then(|v| v.as_integer())
         .map_or(50, |n| n.clamp(0, 100) as u8);
     let glass = glass_from_toml(table.get("glass"))?;
+    let fonts = fonts_from_toml(table.get("fonts"));
     let welcomed = table
         .get("welcomed")
         .and_then(|v| v.as_bool())
@@ -374,6 +437,10 @@ pub fn load(paths: &Paths) -> Result<Settings> {
         Some(c) => MenuClick::parse(c)?,
         None => MenuClick::default(),
     };
+    let reopen = match table.get("reopen").and_then(|v| v.as_str()) {
+        Some(r) => Reopen::parse(r)?,
+        None => Reopen::default(),
+    };
     let log = table.get("log").and_then(|v| v.as_bool()).unwrap_or(false);
     let close_idle_settings = table
         .get("close_idle_settings")
@@ -405,6 +472,29 @@ pub fn load(paths: &Paths) -> Result<Settings> {
             glass_lift.entry(theme.to_string()).or_insert(50);
         }
     }
+    let names: BTreeMap<String, String> = table
+        .get("names")
+        .and_then(|v| v.as_table())
+        .map(|t| {
+            t.iter()
+                .filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_string())))
+                .collect()
+        })
+        .unwrap_or_default();
+    let pins: BTreeMap<String, String> = table
+        .get("pins")
+        .and_then(|v| v.as_table())
+        .map(|t| {
+            t.iter()
+                .filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_string())))
+                .collect()
+        })
+        .unwrap_or_default();
+    let herdr_frost = table
+        .get("herdr")
+        .and_then(|v| v.get("frost_from"))
+        .and_then(|v| v.as_str())
+        .map(String::from);
     let bar_scroll = table
         .get("bar_scroll")
         .and_then(|v| v.as_bool())
@@ -436,9 +526,13 @@ pub fn load(paths: &Paths) -> Result<Settings> {
         monochrome,
         bar_scroll,
         glass_lift,
+        names,
+        pins,
+        herdr_frost,
         original_colours,
         windows,
         menu_click,
+        reopen,
         performance,
         hotkey,
         off,
@@ -449,6 +543,7 @@ pub fn load(paths: &Paths) -> Result<Settings> {
         zed_glass,
         zed_strength,
         glass,
+        fonts,
         schedule: crate::schedule::from_toml(table.get("schedule")),
         favourites,
         next_cycles,
@@ -470,6 +565,8 @@ pub fn save(paths: &Paths, settings: &Settings) -> Result<()> {
          # The app (`palette ui`): windows \"ready\", \"on-demand\" or \"all-on-demand\"; menu bar click opens \"menu\", \"picker\" or \"quick-switcher\"\n\
          windows = \"{}\"\n\
          menu_click = \"{}\"\n\
+         # Opening Palette again (Finder, Spotlight) while it runs: \"picker\", \"settings\" or \"quick-switcher\"\n\
+         reopen = \"{}\"\n\
          # Windows on demand: close Settings after 10 minutes without focus, even while open\n\
          close_idle_settings = {}\n\
          # One line per switch in palette.log, on this Mac only (`palette log`)\n\
@@ -495,6 +592,7 @@ pub fn save(paths: &Paths, settings: &Settings) -> Result<()> {
         settings.bar_scroll,
         settings.windows.as_str(),
         settings.menu_click.as_str(),
+        settings.reopen.as_str(),
         settings.close_idle_settings,
         settings.log,
         settings.readability.as_str(),
@@ -536,6 +634,29 @@ pub fn save(paths: &Paths, settings: &Settings) -> Result<()> {
             text.push_str(&format!("{} = {v}\n", if bare { theme } else { &quoted }));
         }
     }
+    if !settings.names.is_empty() {
+        text.push_str(
+            "\n# Names shown instead of the theme's folder name (`palette rename`)\n[names]\n",
+        );
+        for (theme, shown) in &settings.names {
+            let shown = toml::Value::String(shown.clone()).to_string();
+            text.push_str(&format!("{theme} = {shown}\n"));
+        }
+    }
+    if let Some(from) = &settings.herdr_frost {
+        text.push_str(&format!(
+            "\n# Herdr uses Palette's frosted copy of this layout (`palette glass herdr-app --frost`)\n\
+             [herdr]\nfrost_from = {}\n",
+            toml::Value::String(from.clone())
+        ));
+    }
+    if !settings.pins.is_empty() {
+        text.push_str("\n# Apps that keep their own theme (`palette pin`)\n[pins]\n");
+        for (app, theme) in &settings.pins {
+            let theme = toml::Value::String(theme.clone()).to_string();
+            text.push_str(&format!("{app} = {theme}\n"));
+        }
+    }
     text.push_str(&format!(
         "\n# Obsidian: accent ring around the active pane, fade the others (`palette obsidian`)\n\
          [obsidian]\nfocus_ring = {}\ndim_inactive = {}\n",
@@ -560,6 +681,28 @@ pub fn save(paths: &Paths, settings: &Settings) -> Result<()> {
                 g.strength,
                 g.blur
             ));
+        }
+    }
+    let fonts: Vec<_> = settings
+        .fonts
+        .iter()
+        .filter(|(_, f)| !f.is_empty())
+        .collect();
+    if !fonts.is_empty() {
+        text.push_str(
+            "\n# Fonts (`palette font <app>`): size in points and family; a missing one is your own\n",
+        );
+        for (app, f) in fonts {
+            text.push_str(&format!("[fonts.{app}]\n"));
+            if let Some(size) = f.size {
+                text.push_str(&format!("size = {size}\n"));
+            }
+            if let Some(family) = &f.family {
+                text.push_str(&format!(
+                    "family = {}\n",
+                    toml::Value::from(family.as_str())
+                ));
+            }
         }
     }
     let p = settings.performance;
@@ -615,8 +758,9 @@ impl Glass {
 }
 
 /// The apps with a window glass control (`palette glass`): the terminals, and Dispatch and
-/// EasyPlots and the Habit Tracker (which read it from their colours files).
-pub const GLASS_APPS: [&str; 7] = [
+/// EasyPlots and the Habit Tracker (which read it from their colours files), and Palette's
+/// own picker and quick switcher (ROADMAP 15b; the app reads it when it opens them).
+pub const GLASS_APPS: [&str; 9] = [
     "ghostty",
     "kitty",
     "alacritty",
@@ -624,6 +768,8 @@ pub const GLASS_APPS: [&str; 7] = [
     "dispatch",
     "easyplots",
     "habit-tracker",
+    "palette",
+    "herdr-app",
 ];
 
 /// A terminal window's look. `Own` writes nothing, so the app's own config
@@ -670,6 +816,13 @@ impl TermGlass {
         use TermGlass::*;
         if app == "ghostty" {
             &[Own, Solid, Blurred, Clear, LiquidGlass, LiquidClear]
+        } else if app == "palette" {
+            // Palette's windows have no config of their own to leave it to.
+            &[Solid, Blurred, Clear]
+        } else if app == "herdr-app" {
+            // See-through colours in Palette's theme file; the frost is your layout's own
+            // `"window_blur": true`, so no Blurred kind here (IDEAS 36).
+            &[Own, Solid, Clear]
         } else {
             &[Own, Solid, Blurred, Clear]
         }
@@ -697,6 +850,70 @@ impl Default for WindowGlass {
 }
 
 /// `[glass.<app>]` tables; unknown apps are ignored, a bad kind is an error.
+/// Apps whose font Palette can set (`palette font`): the terminals through Palette's own
+/// file, the editors through one key in their settings.json.
+pub const FONT_APPS: [&str; 6] = [
+    "ghostty",
+    "kitty",
+    "alacritty",
+    "wezterm",
+    "zed",
+    "vscodium",
+];
+
+/// The smallest and largest font size Palette writes, in points.
+pub const FONT_SIZES: (f32, f32) = (6.0, 48.0);
+
+/// One app's font from Palette. `None` = yours (Palette writes no line for it).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct AppFont {
+    /// Points; halves allowed (Ghostty, kitty and Zed take 13.5).
+    pub size: Option<f32>,
+    pub family: Option<String>,
+}
+
+impl AppFont {
+    pub fn is_empty(&self) -> bool {
+        self.size.is_none() && self.family.is_none()
+    }
+}
+
+/// A size as typed (`14`, `13.5`), rounded to a half point and kept in [`FONT_SIZES`].
+pub fn font_size(n: f32) -> Result<f32> {
+    let (lo, hi) = FONT_SIZES;
+    if !n.is_finite() || n < lo || n > hi {
+        anyhow::bail!("a font size goes from {lo} to {hi} points");
+    }
+    Ok((n * 2.0).round() / 2.0)
+}
+
+fn fonts_from_toml(value: Option<&toml::Value>) -> BTreeMap<String, AppFont> {
+    let mut out = BTreeMap::new();
+    let Some(table) = value.and_then(|v| v.as_table()) else {
+        return out;
+    };
+    for app in FONT_APPS {
+        let Some(t) = table.get(app).and_then(|v| v.as_table()) else {
+            continue;
+        };
+        let size = t
+            .get("size")
+            .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|n| n as f64)))
+            .and_then(|n| font_size(n as f32).ok());
+        let family = t
+            .get("family")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(String::from);
+        let font = AppFont { size, family };
+        if !font.is_empty() {
+            out.insert(app.to_string(), font);
+        }
+    }
+    out
+}
+
 fn glass_from_toml(value: Option<&toml::Value>) -> Result<BTreeMap<String, WindowGlass>> {
     let mut out = BTreeMap::new();
     let Some(table) = value.and_then(|v| v.as_table()) else {
@@ -817,6 +1034,8 @@ mod tests {
         s.close_idle_settings = true;
         s.readability = crate::normalise::Level::Strong;
         s.original_colours.insert("ash".into());
+        s.pins.insert("ghostty".into(), "nord".into());
+        s.herdr_frost = Some("main".into());
         s.glass.insert(
             "ghostty".into(),
             WindowGlass {

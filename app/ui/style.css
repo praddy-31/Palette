@@ -17,6 +17,8 @@ button { font: inherit; color: inherit; }
   background: var(--bg); border: 1px solid color-mix(in srgb, var(--fg) 14%, transparent);
   border-radius: 14px; overflow: hidden; box-shadow: 0 16px 44px rgb(0 0 0 / .45);
 }
+/* Palette's own glass (15b): see-through, filling the window so the blur behind lines up. */
+body.glass .panel { inset: 0; box-shadow: none; background: color-mix(in srgb, var(--bg) var(--panel-alpha, 100%), transparent); }
 .spacer { flex: 1; }
 
 /* ---------- picker ---------- */
@@ -535,6 +537,59 @@ pre.hint { margin: 6px 0 0; font-family: var(--mono); font-size: 11px; white-spa
 .dk-it.over { box-shadow: -3px 0 0 var(--accent); }
 .dk-add { border: none; background: none; color: var(--dim); font-size: 14px; padding: 0 4px; cursor: pointer; }
 .dk-add:hover { color: var(--accent); }
+/* Bar page (18): saved bars, real-size preview, tabs, tray */
+.dk-saved .select { max-width: 220px; }
+.dk-preview { margin: 8px 0 4px; }
+.dk-preview-h { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.dk-preview-h .sub { font-size: 11.5px; color: var(--dim); }
+.dk-zoom .btn { padding: 3px 9px; font-size: 12px; }
+.dk-bar-wrap:has(> .dk-bar.folded) { overflow: auto; }
+.dk-bar.folded { width: auto; min-width: 0; flex-wrap: wrap; row-gap: 6px; }
+/* A side wider than the pane wraps its pills too (owner, 2026-11-11: a new pill was cut off). */
+.dk-bar.folded, .dk-bar.folded .dk-side { flex-wrap: wrap; row-gap: 6px; max-width: 100%; }
+.dk-grip { cursor: grab; color: color-mix(in srgb, var(--fg) 45%, transparent); font-size: 11px; letter-spacing: -2px;
+  padding: 0 6px 0 2px; user-select: none; -webkit-user-select: none; touch-action: none; order: -1; }
+.dk-grip:hover { color: var(--accent); }
+.dk-ghost { position: fixed; z-index: 60; pointer-events: none; padding: 3px 10px; border-radius: 999px;
+  background: var(--accent); color: var(--bg); font: 600 12px var(--mono); box-shadow: 0 6px 18px rgb(0 0 0 / .35); }
+.dk-pill.over, .dk-it.over { outline: 2px dashed var(--accent); }
+.dk-fold { flex: none; align-self: stretch; display: grid; place-items: center; padding: 0 8px; color: var(--dim);
+  border-left: 1px dashed color-mix(in srgb, var(--fg) 25%, transparent); border-right: 1px dashed color-mix(in srgb, var(--fg) 25%, transparent);
+  font: 11px var(--mono); }
+.dk-side.over { outline: 2px dashed var(--accent); outline-offset: 2px; }
+.dk-pill { cursor: grab; box-sizing: border-box; min-height: 0; }
+.dk-pill.sel { box-shadow: 0 0 0 2px var(--accent), 0 0 0 5px color-mix(in srgb, var(--accent) 25%, transparent); }
+.dk-pill .dk-empty { font-size: 11px; padding: 0 6px; }
+.dk-it { font-size: 12px; }
+.dk-it b { flex: none; }
+.dk-it.needs { text-decoration: underline dotted color-mix(in srgb, var(--red) 70%, transparent); text-underline-offset: 3px; }
+.dk-it.perf { opacity: .55; }
+.dk-beats { display: inline-flex; align-items: center; gap: 2px; margin-right: 3px; }
+.dk-beats i { display: block; width: 3px; border-radius: 1px; }
+.dk-tabs { display: flex; align-items: center; gap: 6px; margin: 12px 0 6px; }
+.dk-tabs > .btn { padding: 3px 10px; }
+.dk-tray { margin: 10px 0; padding: 10px; border-radius: 10px; background: var(--bg-dark); border: 1px solid color-mix(in srgb, var(--fg) 10%, transparent); }
+.dk-tray-h { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }
+.dk-tray-q { width: 170px; }
+#dk-tray-hint { margin: 8px 0 0; font-size: 11.5px; color: var(--dim); }
+.dk-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; }
+.dk-tile, .dk-preset { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; text-align: left; padding: 7px 9px;
+  border-radius: 8px; border: 1px solid color-mix(in srgb, var(--fg) 12%, transparent); background: var(--surface); color: var(--fg); cursor: pointer; }
+.dk-tile:hover:not(:disabled), .dk-preset:hover { border-color: var(--accent); }
+.dk-tile.used { opacity: .45; cursor: default; }
+.dk-tile-n { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 12.5px; }
+.dk-tile-n b { width: 7px; height: 7px; border-radius: 2px; }
+.dk-tile-w { font-size: 11px; color: var(--dim); line-height: 1.3; }
+.dk-tile .badge.warn { color: var(--red); }
+.dk-presets { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 6px; margin-bottom: 6px; }
+.dk-preset { border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
+.dk-preset.layout { background: var(--bg); }
+.dk-preset-t { display: flex; justify-content: space-between; width: 100%; gap: 6px; font-weight: 600; font-size: 12.5px; }
+.dk-preset-t .sub { font-weight: 400; font-size: 11px; color: var(--dim); }
+.dk-mini { display: flex; flex-wrap: wrap; gap: 3px; }
+.dk-mini i { font: 10.5px var(--mono); font-style: normal; padding: 1px 6px; border-radius: 999px; background: var(--sel); color: var(--on-sel); }
+.dk-mini i.used { opacity: .4; text-decoration: line-through; }
+.dk-pill-box { border-style: dashed; }
 .dk-menu { position: fixed; z-index: 50; display: flex; flex-direction: column; width: 320px; max-height: 300px; overflow: auto;
   padding: 6px; border-radius: 10px; background: var(--surface); border: 1px solid var(--muted); box-shadow: 0 10px 30px rgb(0 0 0 / .4); }
 .dk-menu-h { padding: 6px 8px 2px; font-size: 10.5px; color: var(--dim); text-transform: uppercase; letter-spacing: .05em; }
@@ -658,3 +713,46 @@ body.window .settings { padding-bottom: calc(var(--strip-h, 34px) + 44px); }
 body[data-view="settings"] .toast { bottom: calc(var(--strip-h, 34px) + 12px); }
 /* The setting the keyboard is on. */
 .settings .row :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* My themes → rename (17b) */
+.mine-rename { opacity: .55; font-size: 12px; padding: 0 2px; }
+.row:hover .mine-rename, .mine-rename:focus { opacity: 1; }
+.mine-rename-box { width: 100%; max-width: 260px; }
+
+/* Settings → Apps → Font (22b) */
+.font-pick { display: flex; align-items: center; gap: 6px; flex: none; }
+.font-pick select.font-family { max-width: 220px; }
+.font-pick input.search.font-size { width: 72px; flex: none; min-width: 0; }
+
+/* Move to another Mac → import: apps not on this Mac (25a) */
+.import-needs { margin-top: 10px; display: grid; gap: 6px; }
+.import-script { white-space: pre-wrap; user-select: text; font-size: 12px; padding: 8px 10px; border-radius: 8px; background: var(--input, rgba(127,127,127,.12)); margin: 0; }
+
+/* 25b: an imported app is installed now (popup once) */
+.arrived { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; background: rgba(0,0,0,.35); padding: 16px; }
+.arrived-card { max-width: 380px; width: 100%; background: var(--surface); color: var(--fg); border: 1px solid var(--muted);
+  border-radius: 12px; padding: 16px; display: grid; gap: 8px; text-align: center; box-shadow: 0 12px 40px rgba(0,0,0,.4); }
+.arrived-cmd { font: 12px ui-monospace, Menlo, monospace; user-select: text; padding: 4px 8px; border-radius: 6px; background: rgba(127,127,127,.15); }
+.arrived-btns { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; margin-top: 4px; }
+
+/* ROADMAP 24: pinned apps. Settings → Apps: the colours an app gets and its theme menu, shown
+   before the switch (the switch comes first in the page, so a click on the row still toggles). */
+.row > .switch { order: 2; }
+.row .pinbox { order: 1; display: flex; align-items: center; gap: 8px; flex: none; }
+.dots { display: flex; gap: 3px; }
+.dots i { width: 10px; height: 10px; border-radius: 3px; display: block; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) 15%, transparent); }
+.select.pin { max-width: 150px; font-size: 12px; }
+.select.pin.on { border-color: var(--accent); color: var(--accent); }
+/* Picker: a strip of pins above the grid, and a pin badge on a pinned theme's card. */
+.grid .pins { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
+.chip { font: inherit; font-size: 11px; color: var(--fg); background: var(--sel); border: 0; border-radius: 999px; padding: 2px 9px; cursor: pointer; }
+.chip b { color: var(--accent); font-weight: 600; }
+.badge.pin { background: transparent; padding: 0; }
+
+/* Bar page → App icons (IDEAS 37b): the glyph as the bar draws it, in the icon font. */
+.dk-glyph { font-family: "sketchybar-app-font"; font-size: 16px; min-width: 22px; text-align: center; }
+.dk-glyph.dim { opacity: 0.4; }
+/* App icons: "Show all installed apps" and its search, flush with the rows above */
+.dk-more-apps { display: block; margin: 14px 0 10px; }
+.dk-app-search { display: block; box-sizing: border-box; width: 100%; max-width: 320px; margin: 0 0 12px; }
+.dk-icon { width: 170px; font-family: var(--mono); font-size: 12px; }

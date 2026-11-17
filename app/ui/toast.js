@@ -33,7 +33,7 @@ function show(s) {
   paint(s.colors);
   const msg = $("#msg");
   const problem = s.problems.length ? s.problems.join(" · ") : null;
-  msg.replaceChildren(s.undo ? "Back to " : "Switched to ", Object.assign(document.createElement("b"), { textContent: s.theme }));
+  msg.replaceChildren(s.undo ? "Back to " : "Switched to ", Object.assign(document.createElement("b"), { textContent: s.title || s.theme }));
   if (problem) msg.append(Object.assign(document.createElement("span"), { className: "sub", textContent: problem }));
   $("#note").classList.toggle("error", !!problem);
   $("#undo-btn").hidden = s.undo;

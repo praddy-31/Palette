@@ -74,3 +74,23 @@ fn the_bar_pill_opens_what_the_menu_bar_click_opens() {
     let item = home.current_file("sketchybar-item.sh");
     assert!(item.contains("open -g palette://click"), "{item}");
 }
+
+/// 17c: what opening Palette again shows: the picker until chosen, saved, kept by other changes.
+#[test]
+fn opening_again_shows_what_you_chose() {
+    let home = Home::new();
+    let out = home.ok(&["ui", "--status"]);
+    assert!(out.contains("Opening again: picker"), "{out}");
+    let out = home.ok(&["ui", "--reopen", "settings"]);
+    assert!(out.contains("Opening again: settings"), "{out}");
+    assert!(
+        home.read(".config/palette/settings.toml")
+            .contains("reopen = \"settings\"")
+    );
+    home.ok(&["ui", "--click", "menu"]);
+    assert!(
+        home.ok(&["ui", "--status"])
+            .contains("Opening again: settings")
+    );
+    home.fails(&["ui", "--reopen", "dock"]);
+}

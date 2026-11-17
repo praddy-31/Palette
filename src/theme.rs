@@ -41,6 +41,11 @@ pub const REQUIRED_KEYS: [&str; 23] = [
 /// missing. In order: `brown` falls back to `orange`, which is filled first.
 const OPTIONAL_KEYS: [(&str, &str); 2] = [("orange", "yellow"), ("brown", "orange")];
 
+/// Keys a theme (or your edits) may set and that stay unset otherwise: Palette works them
+/// out from the others when they're missing (23b: `editor_selection`, the selection editors
+/// draw code on, from [`crate::normalise::editor_selection`]).
+pub const OWN_KEYS: [&str; 1] = ["editor_selection"];
+
 /// The 16 ANSI terminal colours, as keys into `colors.toml`.
 const ANSI_KEYS: [&str; 16] = [
     "dark_background",
@@ -177,6 +182,16 @@ impl Colors {
             }
         }
 
+        for key in OWN_KEYS {
+            match table.get(key) {
+                Some(toml::Value::String(s)) if is_hex_colour(s) => {
+                    values.insert(key, s.to_ascii_lowercase());
+                }
+                Some(other) => problems.push(format!("`{key}` = {other} is not #RRGGBB")),
+                None => {}
+            }
+        }
+
         let mode = match table.get("mode") {
             None => Mode::Dark,
             Some(toml::Value::String(s)) if s == "dark" => Mode::Dark,
@@ -204,9 +219,27 @@ impl Colors {
         })
     }
 
-    /// `#rrggbb` for a known key (required or optional, filled in).
+    /// `#rrggbb` for a known key (required or optional, filled in). Panics on any other name:
+    /// for a name that comes from outside the code, use [`Colors::try_get`].
     pub fn get(&self, key: &str) -> &str {
         &self.values[key]
+    }
+
+    /// `#rrggbb` for `key`, or `None` when the theme has no colour by that name.
+    pub fn try_get(&self, key: &str) -> Option<&str> {
+        self.values.get(key).map(String::as_str)
+    }
+
+    /// A colour that may be unset ([`OWN_KEYS`]); any key.
+    pub fn get_opt(&self, key: &str) -> Option<&str> {
+        self.values.get(key).map(String::as_str)
+    }
+
+    /// Unset one of [`OWN_KEYS`] (so Palette works it out again).
+    pub fn unset(&mut self, key: &str) {
+        if OWN_KEYS.contains(&key) {
+            self.values.remove(key);
+        }
     }
 
     /// Change one colour (`edits.toml`). `false` if `key` isn't a theme
@@ -239,6 +272,7 @@ pub fn colour_key(key: &str) -> Option<&'static str> {
         .iter()
         .copied()
         .chain(OPTIONAL_KEYS.iter().map(|(k, _)| *k))
+        .chain(OWN_KEYS)
         .find(|k| *k == key)
 }
 
@@ -311,6 +345,29 @@ impl Theme {
 
 /// Load a theme by name for use: your colour edits (`edits.toml`) on top, then Palette's
 /// readability fixes (`normalise`, which never touch a key you edited).
+/// Is `name` one of the themes built into Palette?
+pub fn is_bundled(name: &str) -> bool {
+    BUNDLED.iter().any(|(n, _)| *n == name)
+}
+
+/// The words a theme is labelled with (ROADMAP 17d), for the picker, My themes and
+/// `palette list`: `installed` (downloaded), `yours` (made here: new, from a wallpaper, a
+/// copy), and `edited` too when it has colour edits. Bundled themes: none, or just `edited`.
+pub fn badges(theme: &Theme) -> Vec<&'static str> {
+    let mut out = Vec::new();
+    if theme.origin == Origin::User {
+        out.push(if crate::install::is_downloaded(&theme.dir) {
+            "installed"
+        } else {
+            "yours"
+        });
+    }
+    if !crate::edits::read(&theme.dir).is_empty() {
+        out.push("edited");
+    }
+    out
+}
+
 pub fn load(paths: &Paths, name: &str) -> Result<Theme> {
     Ok(load_fixed(paths, name)?.0)
 }

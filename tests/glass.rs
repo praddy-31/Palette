@@ -72,3 +72,37 @@ fn see_through_text_is_lifted_over_a_bright_wallpaper_and_follows_it() {
     let out = home.ok(&["check"]);
     assert!(!out.contains("ghostty"), "{out}");
 }
+
+#[test]
+fn herdr_app_glass_is_see_through_colours_in_its_theme_file() {
+    let home = Home::new();
+    home.ok(&["set", "tokyo-night"]);
+    let solid = home.current_file("herdr-app.json");
+    assert!(!solid.contains("canvas"), "{solid}");
+
+    home.ok(&["glass", "herdr-app", "clear", "--strength", "40"]);
+    let clear = home.current_file("herdr-app.json");
+    // 40 % see-through: alpha 0x99 everywhere (a more solid sidebar or panel hid the frost).
+    // The top-level background stays solid: Herdr rejects the whole theme otherwise (seen live).
+    assert!(clear.contains("\"background\": \"#1a1b26\""), "{clear}");
+    assert!(clear.contains("\"canvas\": \"#1a1b2699\""), "{clear}");
+    // The window's own colours are in the `colors` map (background, surface, raised): those are
+    // what Herdr's frost shows through (checked on the owner's Herdr).
+    assert!(
+        clear.contains("    \"background\": \"#1a1b2699\""),
+        "{clear}"
+    );
+    assert!(clear.contains("\"surface\": \"#1a1b2699\""), "{clear}");
+    assert!(clear.contains("\"raised\": \"#24283b99\""), "{clear}");
+    assert!(clear.contains("\"chrome\": \"#0e0e1499\""), "{clear}");
+
+    // The frost is the layout's window_blur, Herdr's own: no Blurred kind here.
+    let err = home.fails(&["glass", "herdr-app", "blurred"]);
+    assert!(
+        err.contains("herdr-app has no blurred glass (it offers own, solid, clear)"),
+        "{err}"
+    );
+
+    home.ok(&["glass", "herdr-app", "own"]);
+    assert_eq!(home.current_file("herdr-app.json"), solid);
+}

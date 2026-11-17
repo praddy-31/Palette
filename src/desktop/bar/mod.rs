@@ -19,13 +19,21 @@ use super::{File, Tool, sh_quote};
 use crate::paths::Paths;
 use crate::system::{self, Outcome};
 
-const SCRIPTS: [(&str, &str); 6] = [
+pub mod live;
+pub mod presets;
+pub mod recolour;
+pub mod saved;
+
+const SCRIPTS: [(&str, &str); 9] = [
     ("spaces.sh", include_str!("spaces.sh")),
     ("stats.sh", include_str!("stats.sh")),
+    ("stats_feed.sh", include_str!("stats_feed.sh")),
     ("widgets.sh", include_str!("widgets.sh")),
     ("habits.sh", include_str!("habits.sh")),
     ("dispatch.sh", include_str!("dispatch.sh")),
     ("front_app.sh", include_str!("front_app.sh")),
+    ("nowplaying.sh", include_str!("nowplaying.sh")),
+    ("nowplaying.js", include_str!("nowplaying.js")),
 ];
 
 /// Something that can go in a pill.
@@ -74,7 +82,8 @@ pub const KINDS: &[Kind] = &[
         "AeroSpace workspaces with their apps; click to go there",
         "desktop",
         "",
-        30,
+        // Only a safety net: events cover every change (ROADMAP 18d, was 30 s).
+        120,
     ),
     kind(
         "front_app",
@@ -151,12 +160,28 @@ pub const KINDS: &[Kind] = &[
         "open 'dispatch://open/research'",
         60,
     ),
+    kind(
+        "nowplaying",
+        "Now playing",
+        "Title and artist of what's playing, with beat lines; click: play/pause or open the player",
+        "system",
+        "",
+        0,
+    ),
     kind("cpu", "CPU", "Processor use", "stats", OPEN_AM, 0),
     kind("gpu", "GPU", "Graphics use", "stats", OPEN_AM, 0),
     kind(
         "temp",
         "Temperature",
         "CPU temperature (needs macmon)",
+        "stats",
+        OPEN_AM,
+        0,
+    ),
+    kind(
+        "gputemp",
+        "GPU temperature",
+        "Graphics chip temperature (needs macmon)",
         "stats",
         OPEN_AM,
         0,
@@ -229,7 +254,9 @@ pub fn find_kind(id: &str) -> Option<&'static Kind> {
     KINDS.iter().find(|k| k.id == id)
 }
 
-const STATS: [&str; 8] = ["cpu", "gpu", "temp", "pwr", "mem", "disk", "vpn", "net"];
+const STATS: [&str; 9] = [
+    "cpu", "gpu", "temp", "gputemp", "pwr", "mem", "disk", "vpn", "net",
+];
 
 /// Nerd Font glyphs, as in the owner's bar.
 fn glyph(kind: &str) -> &'static str {
@@ -241,9 +268,11 @@ fn glyph(kind: &str) -> &'static str {
         "disk" => "\u{f0a0}",
         "net" => "\u{f019}",
         "temp" => "\u{f2c9}",
+        "gputemp" => "\u{f2c8}",
         "pwr" => "\u{f1e6}",
         "vpn" => "\u{f132}",
         "link" => "\u{f0c1}",
+        "nowplaying" => "\u{f001}",
         _ => "",
     }
 }
@@ -277,7 +306,47 @@ pub struct Item {
     pub all_displays: bool,
     /// Disk: shown from this % full.
     pub disk_at: u8,
+    /// GPU: `busy` (macmon's share of time busy, steady) or `raw` (the GPU driver's
+    /// "Device Utilization %", jumps between 0 and ~50 at rest). Without macmon: raw.
+    pub gpu: String,
+    /// Hidden while Performance mode's "Slower bar" part is on (ROADMAP 18, S11).
+    #[serde(skip_serializing_if = "is_false")]
+    pub hide_in_performance: bool,
+    /// Now playing: beat lines that move with what the Mac plays (Palette's helper, ROADMAP 20).
+    #[serde(skip_serializing_if = "is_true")]
+    pub beats: bool,
+    /// Now playing: the title's width, in characters.
+    #[serde(skip_serializing_if = "is_default_width")]
+    pub width: u8,
+    /// Now playing: a longer title scrolls (true) or is cut with … (false).
+    #[serde(skip_serializing_if = "is_true")]
+    pub scroll: bool,
+    /// Now playing: what a click does unless `click` says otherwise: `toggle` (play/pause) or `open`
+    /// (the player).
+    #[serde(skip_serializing_if = "is_toggle")]
+    pub action: String,
 }
+
+fn is_false(v: &bool) -> bool {
+    !*v
+}
+
+fn is_true(v: &bool) -> bool {
+    *v
+}
+
+fn is_default_width(v: &u8) -> bool {
+    *v == NOWPLAYING_WIDTH
+}
+
+fn is_toggle(v: &String) -> bool {
+    v == "toggle"
+}
+
+/// Now playing's title width by default, in characters.
+pub const NOWPLAYING_WIDTH: u8 = 24;
+/// Beat lines in the now-playing pill.
+pub const BEAT_LINES: u8 = 5;
 
 impl Default for Item {
     fn default() -> Self {
@@ -295,6 +364,12 @@ impl Default for Item {
             hide_empty: false,
             all_displays: false,
             disk_at: 80,
+            gpu: "busy".into(),
+            hide_in_performance: false,
+            beats: true,
+            width: NOWPLAYING_WIDTH,
+            scroll: true,
+            action: "toggle".into(),
         }
     }
 }
@@ -338,6 +413,13 @@ pub struct Pill {
     pub side: String,
     /// Left to right, as you see them.
     pub items: Vec<Item>,
+    /// This pill's own colour (a theme colour name), `none` for no background; empty: the
+    /// bar's pill colour (ROADMAP 18, S9).
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub colour: String,
+    /// This pill's own opacity, 0 to 100; unset: the bar's.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub opacity: Option<u8>,
 }
 
 impl Default for Pill {
@@ -345,7 +427,34 @@ impl Default for Pill {
         Self {
             side: "left".into(),
             items: Vec::new(),
+            colour: String::new(),
+            opacity: None,
         }
+    }
+}
+
+impl Pill {
+    pub fn of(side: &str, kinds: &[&str]) -> Self {
+        Self {
+            side: side.into(),
+            items: kinds.iter().map(|k| Item::of(k)).collect(),
+            ..Self::default()
+        }
+    }
+
+    /// `background.color=…` for this pill: its own colour and opacity, else the bar's.
+    /// `None`: no background at all.
+    fn background(&self, look: &PillLook) -> Option<String> {
+        match self.colour.as_str() {
+            "none" => None,
+            "" => Some(argb(&look.colour, self.opacity.unwrap_or(look.opacity))),
+            own => Some(argb(own, self.opacity.unwrap_or(look.opacity))),
+        }
+    }
+
+    /// Whether this pill looks different from the bar's pills.
+    fn own_look(&self) -> bool {
+        !self.colour.is_empty() || self.opacity.is_some()
     }
 }
 
@@ -410,16 +519,17 @@ pub struct Bar {
     /// How often the stats (CPU … network) refresh, in seconds.
     pub stats_every: u32,
     pub pills: Vec<Pill>,
+    /// Your icon per app (IDEAS 37b, `palette desktop bar icon`): app name as AeroSpace shows
+    /// it → a glyph of the icon font (`:ollama:`) or a few characters. Wins over the icon map.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub icons: BTreeMap<String, String>,
 }
 
 impl Default for Bar {
     /// The owner's bar: workspaces and stats on the left; habits and a
     /// status pill on the right, with Palette's theme pill.
     fn default() -> Self {
-        let pill = |side: &str, kinds: &[&str]| Pill {
-            side: side.into(),
-            items: kinds.iter().map(|k| Item::of(k)).collect(),
-        };
+        let pill = Pill::of;
         Self {
             position: "top".into(),
             height: 36,
@@ -451,6 +561,7 @@ impl Default for Bar {
                     &["weather", "brightness", "volume", "battery", "clock"],
                 ),
             ],
+            icons: BTreeMap::new(),
         }
     }
 }
@@ -575,12 +686,68 @@ impl Bar {
         self.pills.insert(to, pill);
         Ok(to)
     }
+
+    fn movable(&self, p: usize) -> Result<&Pill> {
+        let Some(pill) = self.pills.get(p) else {
+            bail!("there is no pill {p}");
+        };
+        if pill.items.iter().any(|i| i.kind == "palette") {
+            bail!("Palette's theme pill can't be split, merged or copied");
+        }
+        Ok(pill)
+    }
+
+    /// Split pill `p` before its item `at` (S7): the items from `at` on make a new pill just
+    /// right of it, with the same look. Returns the new pill's index.
+    pub fn split_pill(&mut self, p: usize, at: usize) -> Result<usize> {
+        let pill = self.movable(p)?;
+        if at == 0 || at >= pill.items.len() {
+            bail!(
+                "split between two items: 1 to {}",
+                pill.items.len().saturating_sub(1)
+            );
+        }
+        let mut new = pill.clone();
+        new.items = self.pills[p].items.split_off(at);
+        self.pills.insert(p + 1, new);
+        Ok(p + 1)
+    }
+
+    /// Merge pill `p` with the next pill on its side (the one right of it on screen); the
+    /// merged pill keeps `p`'s look. Returns its index.
+    pub fn merge_pill(&mut self, p: usize) -> Result<usize> {
+        self.movable(p)?;
+        let side = self.pills[p].side.clone();
+        let Some(next) = (p + 1..self.pills.len()).find(|&i| self.pills[i].side == side) else {
+            bail!("no pill right of it on the same side to merge with");
+        };
+        self.movable(next)?;
+        let items = self.pills.remove(next).items;
+        self.pills[p].items.extend(items);
+        Ok(p)
+    }
+
+    /// A copy of pill `p` just right of it, without the items the bar can hold only once
+    /// (the clock, the workspaces…). Returns the copy's index.
+    pub fn duplicate_pill(&mut self, p: usize) -> Result<usize> {
+        let mut new = self.movable(p)?.clone();
+        new.items
+            .retain(|i| find_kind(&i.kind).is_some_and(|k| !k.single));
+        if new.items.is_empty() {
+            bail!("everything in this pill can be in the bar only once, so a copy would be empty");
+        }
+        self.pills.insert(p + 1, new);
+        Ok(p + 1)
+    }
 }
 
 impl Bar {
     pub fn validate(&self) -> Result<()> {
         if !["top", "bottom"].contains(&self.position.as_str()) {
             bail!("position is top or bottom");
+        }
+        for (app, glyph) in &self.icons {
+            check_icon(app, glyph)?;
         }
         let n = |v: u32, lo: u32, hi: u32, what: &str| -> Result<()> {
             if (lo..=hi).contains(&v) {
@@ -628,6 +795,12 @@ impl Bar {
         for pill in &self.pills {
             if !SIDES.contains(&pill.side.as_str()) {
                 bail!("a pill's side is left, center or right");
+            }
+            if !pill.colour.is_empty() && pill.colour != "none" {
+                colour(&pill.colour)?;
+            }
+            if pill.opacity.is_some_and(|o| o > 100) {
+                bail!("a pill's opacity is 0 to 100");
             }
             for item in &pill.items {
                 let Some(kind) = find_kind(&item.kind) else {
@@ -680,6 +853,15 @@ fn validate_item(item: &Item, kind: &Kind) -> Result<()> {
             }
         }
         "disk" if !(1..=100).contains(&item.disk_at) => bail!("disk_at is 1 to 100"),
+        "nowplaying" if !(6..=80).contains(&item.width) => {
+            bail!("now playing's width is 6 to 80 characters")
+        }
+        "nowplaying" if !["toggle", "open"].contains(&item.action.as_str()) => {
+            bail!("now playing's click is toggle (play/pause) or open (the player)")
+        }
+        "gpu" if !["busy", "raw"].contains(&item.gpu.as_str()) => {
+            bail!("gpu is busy or raw (not `{}`)", item.gpu)
+        }
         "link" if item.icon.is_empty() && item.label.is_empty() => {
             bail!("a link needs an icon or a label")
         }
@@ -706,8 +888,50 @@ fn argb(key: &str, opacity: u8) -> String {
     format!("${{C_{key}/#0xff/0x{alpha:02x}}}")
 }
 
+/// The beat lines' lowest and highest heights (points) for this bar's pills: the helper's
+/// `--min` and `--max`.
+pub fn beat_range(bar: &Bar) -> (u32, u32) {
+    (2, bar.pill.height.saturating_sub(12).max(6))
+}
+
+/// Whether the bar wants beat lines now (a now-playing item with them on, and not Performance
+/// mode's "Slower bar"): Palette's app runs the helper then.
+pub fn wants_beats(paths: &Paths, bar: &Bar) -> bool {
+    let slower = crate::settings::load(paths)
+        .map(|s| s.performance.stats_now())
+        .unwrap_or(false);
+    !slower
+        && bar
+            .pills
+            .iter()
+            .flat_map(|p| &p.items)
+            .any(|i| i.kind == "nowplaying" && i.beats)
+}
+
 pub fn scripts_dir(paths: &Paths) -> PathBuf {
     paths.root().join("bar")
+}
+
+/// The pill scripts follow the app's version (ROADMAP 28): after an update the scripts in
+/// `~/.config/palette/bar/` would stay as the old version wrote them until the Bar page is
+/// applied again. Rewrites each one whose text differs from the one built in (or that is
+/// missing), only for a bar Palette manages; no SketchyBar reload, as every script is read
+/// afresh when it next runs. Written by rename, so a running script (the stats feed) keeps the
+/// old file it opened and the new one is used from its next start. Returns the names rewritten.
+pub fn update_scripts(paths: &Paths) -> Result<Vec<&'static str>> {
+    if !super::is_managed(paths, Tool::Bar) {
+        return Ok(Vec::new());
+    }
+    let dir = scripts_dir(paths);
+    let mut updated = Vec::new();
+    for (name, text) in SCRIPTS {
+        let path = dir.join(name);
+        if fs::read_to_string(&path).ok().as_deref() != Some(text) {
+            super::write_atomic(&path, text, true)?;
+            updated.push(name);
+        }
+    }
+    Ok(updated)
 }
 
 /// Workspace slots in the bar: more than AeroSpace's 9 shortcuts, plus a
@@ -794,9 +1018,21 @@ pub fn render(paths: &Paths, bar: &Bar) -> Result<Vec<File>> {
         view.background_opacity = 100;
     }
     if perf.stats_now() {
-        view.stats_every = view
-            .stats_every
-            .max(crate::settings::PERFORMANCE_STATS_EVERY);
+        use crate::settings::{
+            PERFORMANCE_MAX_EVERY, PERFORMANCE_PILL_TIMES, PERFORMANCE_STATS_TIMES,
+        };
+        view.stats_every = (view.stats_every * PERFORMANCE_STATS_TIMES).min(PERFORMANCE_MAX_EVERY);
+        for item in view.pills.iter_mut().flat_map(|p| p.items.iter_mut()) {
+            let every = item.every();
+            if every > 0 && item.kind != "clock" {
+                item.every = (every * PERFORMANCE_PILL_TIMES).min(PERFORMANCE_MAX_EVERY);
+            }
+        }
+        // Items marked "Hide in Performance mode" (S11) aren't written; a pill left empty goes.
+        for pill in &mut view.pills {
+            pill.items
+                .retain(|i| !i.hide_in_performance || i.kind == "palette");
+        }
     }
     let bar = &view;
     let dir = scripts_dir(paths);
@@ -860,6 +1096,7 @@ pub fn render(paths: &Paths, bar: &Bar) -> Result<Vec<File>> {
     let mut counters: BTreeMap<&str, usize> = BTreeMap::new();
     let mut stats = Vec::new();
     let mut stats_side = None;
+    let mut gpu_mode = "busy";
     // Where Palette's theme pill goes: after the item added just before it
     // on its side, or before the next pill's gap when it comes first.
     let mut want_palette: Option<(&str, Anchor)> = None;
@@ -972,6 +1209,9 @@ pub fn render(paths: &Paths, bar: &Bar) -> Result<Vec<File>> {
                     }
                     s if STATS.contains(&s) => {
                         stats.push((s, item.disk_at));
+                        if s == "gpu" {
+                            gpu_mode = item.gpu.as_str();
+                        }
                         stats_side.get_or_insert(side);
                         let hidden = if ["disk", "vpn"].contains(&s) {
                             " drawing=off"
@@ -1067,6 +1307,81 @@ pub fn render(paths: &Paths, bar: &Bar) -> Result<Vec<File>> {
                             sh_quote(&format!("bash {}", script("front_app.sh")))
                         ));
                     }
+                    "nowplaying" => {
+                        // Beat lines (Palette's helper sets their heights) left of the title on screen;
+                        // the feeder shows both only while something plays. No beat lines while
+                        // Performance mode's "Slower bar" is on.
+                        let beats = item.beats && !perf.stats_now();
+                        let (low, _) = beat_range(bar);
+                        let ic = &bar.icon_colour;
+                        let click = match item.click.as_str() {
+                            "none" => String::new(),
+                            "" => {
+                                // Play/pause needs the app's library (perl loads it).
+                                let media = crate::system::palette_app_file(
+                                    "Contents/Frameworks/libpalette-media.dylib",
+                                )
+                                .map(|p| format!("MEDIA=\"{}\" ", paths.for_shell(&p)))
+                                .unwrap_or_default();
+                                format!(
+                                    " click_script={}",
+                                    sh_quote(&format!(
+                                        "{media}bash {} {}",
+                                        script("nowplaying.sh"),
+                                        item.action
+                                    ))
+                                )
+                            }
+                            mine => format!(" click_script={}", sh_quote(mine)),
+                        };
+                        let cmd = format!(
+                            "WIDTH={} SCROLL={} BEATS={} bash {}",
+                            item.width,
+                            u8::from(item.scroll),
+                            if beats { BEAT_LINES } else { 0 },
+                            script("nowplaying.sh")
+                        );
+                        let title_left = if left_end && !beats {
+                            format!(" icon.padding_left={}", p.edge)
+                        } else {
+                            String::new()
+                        };
+                        let title_right = if right_end {
+                            format!(" label.padding_right={}", p.edge)
+                        } else {
+                            String::new()
+                        };
+                        let title = format!(
+                            "sketchybar --add item nowplaying {side} --set nowplaying drawing=off icon={} icon.color=$C_{ic} \\\n  label.max_chars={} scroll_texts={} update_freq=60 script={}{click}{title_left}{title_right} \\\n  --subscribe nowplaying system_woke",
+                            sh_quote(glyph("nowplaying")),
+                            item.width,
+                            if item.scroll { "on" } else { "off" },
+                            sh_quote(&cmd)
+                        );
+                        let beat = |b: u8| {
+                            let left = if b == 1 && left_end { p.edge } else { 1 };
+                            format!(
+                                "sketchybar --add item beat.{b} {side} --set beat.{b} drawing=off width=3 icon.drawing=off label.drawing=off \\\n  background.drawing=on background.color=$C_{ic} background.height={low} background.corner_radius=1 padding_left={left} padding_right=1{click}"
+                            )
+                        };
+                        let mut order: Vec<(String, String)> = if beats {
+                            (1..=BEAT_LINES)
+                                .map(|b| (format!("beat.{b}"), beat(b)))
+                                .collect()
+                        } else {
+                            Vec::new()
+                        };
+                        order.push(("nowplaying".into(), title));
+                        if side == "right" {
+                            order.reverse(); // added right to left
+                        }
+                        for (n, text) in order {
+                            line(text);
+                            members.push(n.clone());
+                            last_added = Some(n);
+                        }
+                        continue;
+                    }
                     "link" => {
                         line(format!(
                             "sketchybar --add item {name} {side} --set {name} icon={} icon.color=$C_{} label={}{}{click}{edges}",
@@ -1105,6 +1420,12 @@ pub fn render(paths: &Paths, bar: &Bar) -> Result<Vec<File>> {
                 members.push(name);
             }
             line(format!("pill pill.{side}.{n} {}", members.join(" ")));
+            if pill.own_look() {
+                line(match pill.background(p) {
+                    Some(c) => format!("sketchybar --set pill.{side}.{n} background.color={c}"),
+                    None => format!("sketchybar --set pill.{side}.{n} background.drawing=off"),
+                });
+            }
         }
     }
 
@@ -1115,8 +1436,9 @@ pub fn render(paths: &Paths, bar: &Bar) -> Result<Vec<File>> {
             .find(|(s, _)| *s == "disk")
             .map_or(80, |(_, d)| *d);
         let cmd = format!(
-            "STATS=\"{}\" DISK_AT={disk_at} ICON_KEY={} bash {}",
+            "STATS=\"{}\" DISK_AT={disk_at} EVERY={} GPU={gpu_mode} ICON_KEY={} bash {}",
             names.join(" "),
+            bar.stats_every,
             bar.icon_colour,
             script("stats.sh")
         );
@@ -1141,6 +1463,15 @@ pub fn render(paths: &Paths, bar: &Bar) -> Result<Vec<File>> {
         line(block);
     }
     if let Some((side, anchor)) = &want_palette {
+        let own = bar
+            .pills
+            .iter()
+            .find(|p| p.items.iter().any(|i| i.kind == "palette"));
+        let background =
+            match own.map_or_else(|| Some(argb(&p.colour, p.opacity)), |o| o.background(p)) {
+                Some(c) => format!("background.color={c}"),
+                None => "background.drawing=off".into(),
+            };
         let (gap, mv) = match anchor {
             Anchor::After(prev) => (
                 p.gap,
@@ -1150,8 +1481,7 @@ pub fn render(paths: &Paths, bar: &Bar) -> Result<Vec<File>> {
             Anchor::First => (0, String::new()),
         };
         line(format!(
-            "sketchybar --set palette_pill background.color={} background.corner_radius={} background.height={} \\\n  background.border_width={} background.border_color=$C_{} --set palette_gap width={gap} position={side} \\\n  --set palette position={side} icon.padding_left={e} label.padding_right={e}{mv} 2>/dev/null",
-            argb(&p.colour, p.opacity),
+            "sketchybar --set palette_pill {background} background.corner_radius={} background.height={} \\\n  background.border_width={} background.border_color=$C_{} --set palette_gap width={gap} position={side} \\\n  --set palette position={side} icon.padding_left={e} label.padding_right={e}{mv} 2>/dev/null",
             p.corner_radius,
             p.height,
             p.border_width,
@@ -1183,7 +1513,172 @@ pub fn render(paths: &Paths, bar: &Bar) -> Result<Vec<File>> {
             executable: true,
         });
     }
+    files.push(File {
+        path: dir.join(ICONS_FILE),
+        text: icons_script(&bar.icons),
+        executable: false,
+    });
     Ok(files)
+}
+
+/// Your icons, sourced by `spaces.sh` and `front_app.sh` (IDEAS 37b). Its own file, not in
+/// the scripts, so the scripts stay the same for everyone (ROADMAP 28 keeps them current).
+pub const ICONS_FILE: &str = "icons.sh";
+
+/// `user_icon <app>` sets `icon_result` when you chose an icon for that app.
+fn icons_script(icons: &BTreeMap<String, String>) -> String {
+    let mut out = String::from(
+        "# Palette: your app icons (Bar page → App icons, `palette desktop bar icon`). Generated:\n\
+         # edits are overwritten. Sourced by spaces.sh and front_app.sh; wins over the icon map.\n\
+         user_icon() {\n  case \"$1\" in\n",
+    );
+    for (app, glyph) in icons {
+        out.push_str(&format!(
+            "    {}) icon_result={} ;;\n",
+            sh_quote(app),
+            sh_quote(glyph)
+        ));
+    }
+    out.push_str("  esac\n}\n");
+    out
+}
+
+/// An app name and its icon must be safe inside the generated shell file and short enough
+/// to fit a workspace pill: a glyph name (`:ollama:`) or up to 4 characters.
+fn check_icon(app: &str, glyph: &str) -> Result<()> {
+    if app.trim().is_empty() || app.chars().any(char::is_control) || app.chars().count() > 60 {
+        bail!("an app name is 1 to 60 characters on one line");
+    }
+    let is_name = glyph.len() > 2
+        && glyph.starts_with(':')
+        && glyph.ends_with(':')
+        && glyph[1..glyph.len() - 1]
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+    let short = !glyph.is_empty()
+        && glyph.chars().count() <= 4
+        && !glyph
+            .chars()
+            .any(|c| c.is_control() || c.is_whitespace() || "$`\\'\"".contains(c));
+    if !(is_name || short) {
+        bail!(
+            "an icon is a glyph name like :ollama: (from the icon font) or up to 4 characters \
+             (no spaces, quotes, $, ` or \\)"
+        );
+    }
+    Ok(())
+}
+
+/// Choose `app`'s icon on the bar, or (`None`) give it back to the icon map. Saved in
+/// `bar.toml` and applied like any bar change. The app name is AeroSpace's (`palette desktop
+/// bar icons` lists the apps open now).
+pub fn set_icon(paths: &Paths, app: &str, glyph: Option<&str>) -> Result<super::Applied> {
+    if !super::is_managed(paths, Tool::Bar) {
+        bail!("app icons are for a bar Palette manages: palette desktop bar manage");
+    }
+    let mut bar: Bar = super::get(paths, Tool::Bar)?.try_into()?;
+    match glyph.map(str::trim) {
+        Some(g) => {
+            check_icon(app, g)?;
+            bar.icons.insert(app.to_string(), g.to_string());
+        }
+        None => {
+            bar.icons.remove(app);
+        }
+    }
+    super::set(paths, Tool::Bar, toml::Value::try_from(&bar)?)
+}
+
+/// The glyph names the icon font's map knows (`:ollama:` …), sorted, plus Palette's own
+/// fallbacks; empty when the map isn't installed (`~/.config/sketchybar/helpers/icon_map.sh`).
+pub fn glyphs(paths: &Paths) -> Vec<String> {
+    let map = paths.config_home().join("sketchybar/helpers/icon_map.sh");
+    let Ok(text) = fs::read_to_string(map) else {
+        return Vec::new();
+    };
+    let mut out: Vec<String> = text
+        .split("icon_result=\"")
+        .skip(1)
+        .filter_map(|rest| rest.split('"').next())
+        .filter(|g| g.len() > 2 && g.starts_with(':') && g.ends_with(':'))
+        .map(String::from)
+        .collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// Apps with a window now (AeroSpace's names), to choose icons for. Empty without AeroSpace.
+pub fn open_apps(paths: &Paths) -> Vec<String> {
+    if paths.is_fake() {
+        return Vec::new();
+    }
+    let mut apps: Vec<String> = system::run(
+        "aerospace",
+        &["list-windows", "--all", "--format", "%{app-name}"],
+    )
+    .unwrap_or_default()
+    .lines()
+    .map(|l| l.trim().to_string())
+    .filter(|l| !l.is_empty())
+    .collect();
+    apps.sort();
+    apps.dedup();
+    apps
+}
+
+/// Apps installed on this Mac, by the name AeroSpace shows (the `.app` folder's name), for
+/// giving an icon to an app that isn't open now. Empty in a fake home.
+pub fn installed_apps(paths: &Paths) -> Vec<String> {
+    if paths.is_fake() {
+        return Vec::new();
+    }
+    let mut dirs = vec![
+        PathBuf::from("/Applications"),
+        PathBuf::from("/Applications/Utilities"),
+        PathBuf::from("/System/Applications"),
+        PathBuf::from("/System/Applications/Utilities"),
+    ];
+    dirs.push(paths.home().join("Applications"));
+    let mut apps: Vec<String> = dirs
+        .iter()
+        .filter_map(|d| fs::read_dir(d).ok())
+        .flatten()
+        .flatten()
+        .filter_map(|e| {
+            e.file_name()
+                .to_str()?
+                .strip_suffix(".app")
+                .map(String::from)
+        })
+        .collect();
+    apps.sort_by_key(|a| a.to_lowercase());
+    apps.dedup();
+    apps
+}
+
+/// What the icon font's map gives each app (`:zed:`, or its catch-all `:default:`), asked of
+/// the map itself in one `bash` run, so patterns like `"Adobe Bridge"*` match as on the bar.
+/// Empty when the map isn't installed.
+pub fn map_icons(paths: &Paths, apps: &[String]) -> BTreeMap<String, String> {
+    let map = paths.config_home().join("sketchybar/helpers/icon_map.sh");
+    if apps.is_empty() || !map.is_file() {
+        return BTreeMap::new();
+    }
+    // Sourcing the map defines `__icon_map`. The arguments are cleared first: a sourced file
+    // sees the caller's `"$@"`, and the map maps its arguments when run on its own.
+    let script = r#"map="$1"; shift; apps=("$@"); set --; source "$map" >/dev/null 2>&1
+for app in "${apps[@]}"; do icon_result=""; __icon_map "$app"; printf '%s\t%s\n' "$app" "$icon_result"; done"#;
+    let map = map.to_string_lossy();
+    let mut args = vec!["-c", script, "palette", map.as_ref()];
+    args.extend(apps.iter().map(String::as_str));
+    system::run("bash", &args)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|l| l.split_once('\t'))
+        .filter(|(_, g)| !g.is_empty())
+        .map(|(a, g)| (a.to_string(), g.to_string()))
+        .collect()
 }
 
 /// Where a pill can sit, in SketchyBar's words. Left and centre items are
@@ -1217,6 +1712,21 @@ pub fn font_warnings(bar: &Bar) -> Vec<String> {
         )];
     }
     Vec::new()
+}
+
+/// A theme switch on a bar Palette manages: the colours set in place (no blank bar, no
+/// restarted scripts). `None` when the bar isn't Palette's (or its file is gone): reload it.
+pub fn recolour(paths: &Paths) -> Option<Outcome> {
+    if !super::is_managed(paths, Tool::Bar) {
+        return None;
+    }
+    let rc = fs::read_to_string(Tool::Bar.files(paths).remove(0)).ok()?;
+    let item = fs::read_to_string(paths.current().join("sketchybar-item.sh")).ok();
+    let script = recolour::script(&rc, item.as_deref());
+    Some(match system::recolour_sketchybar(&script) {
+        Ok(_) => Outcome::Done("colours set (no reload)".into()),
+        Err(e) => Outcome::Failed(e),
+    })
 }
 
 pub fn reload(_: &Paths) -> Outcome {
@@ -1392,6 +1902,7 @@ pub fn import(paths: &Paths) -> (Bar, Vec<String>) {
         let pill = Pill {
             side: side.clone(),
             items: pill_items,
+            ..Pill::default()
         };
         if side == "right" {
             right.push(pill)
@@ -1410,6 +1921,7 @@ pub fn import(paths: &Paths) -> (Bar, Vec<String>) {
         pills.push(Pill {
             side: "right".into(),
             items: vec![Item::of("palette")],
+            ..Pill::default()
         });
     }
     pills.extend(right);

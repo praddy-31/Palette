@@ -69,6 +69,10 @@ pub struct Schedule {
     /// Fixed mode: minutes after midnight, local time.
     pub day_at: u16,
     pub night_at: u16,
+    /// Saved bars (`palette desktop bar saved`) for the day and the night, at the same times as
+    /// the themes; empty: the bar stays as it is (ROADMAP 18, S10).
+    pub day_bar: String,
+    pub night_bar: String,
 }
 
 impl Default for Schedule {
@@ -83,6 +87,8 @@ impl Default for Schedule {
             lon: None,
             day_at: 7 * 60,
             night_at: 19 * 60,
+            day_bar: String::new(),
+            night_bar: String::new(),
         }
     }
 }
@@ -92,6 +98,13 @@ impl Schedule {
         match phase {
             Phase::Day => &self.day,
             Phase::Night => &self.night,
+        }
+    }
+
+    pub fn bar_for(&self, phase: Phase) -> &str {
+        match phase {
+            Phase::Day => &self.day_bar,
+            Phase::Night => &self.night_bar,
         }
     }
 
@@ -142,6 +155,8 @@ pub(crate) fn from_toml(table: Option<&toml::Value>) -> Schedule {
     if let Some(m) = text("night_at").and_then(|v| parse_hm(&v).ok()) {
         s.night_at = m;
     }
+    s.day_bar = text("day_bar").unwrap_or_default();
+    s.night_bar = text("night_bar").unwrap_or_default();
     s
 }
 
@@ -166,6 +181,13 @@ pub(crate) fn to_toml(s: &Schedule) -> String {
         fmt_hm(s.day_at),
         fmt_hm(s.night_at)
     ));
+    if !s.day_bar.is_empty() || !s.night_bar.is_empty() {
+        out.push_str(&format!(
+            "# Saved bars for the day and the night (empty: the bar stays)\nday_bar = {}\nnight_bar = {}\n",
+            quote(&s.day_bar),
+            quote(&s.night_bar)
+        ));
+    }
     out
 }
 
@@ -588,6 +610,13 @@ fn remember_boundary(paths: &Paths, boundary: i64) -> Result<()> {
 
 fn forget_boundary(paths: &Paths) {
     let _ = fs::remove_file(state_file(paths));
+    let _ = fs::remove_file(bar_state_file(paths));
+}
+
+/// The bar's own record of the boundary it last handled: a bar switched by hand stays until
+/// the next boundary, the same rule as the themes.
+fn bar_state_file(paths: &Paths) -> std::path::PathBuf {
+    paths.root().join("schedule-bar.state")
 }
 
 /// What `apply_now` did.
@@ -637,6 +666,10 @@ pub fn apply_now(paths: &Paths) -> Result<Applied> {
                 .unwrap_or_else(|| "schedule can't be worked out".into())
         );
     };
+    // The bar first and on its own: a bar that can't switch never stops the theme.
+    if let Err(e) = apply_bar(paths, s.bar_for(now.phase), now.since.unwrap_or(0)) {
+        eprintln!("palette: schedule: bar: {e:#}");
+    }
     let wanted = s.theme_for(now.phase).to_string();
     let boundary = now.since.unwrap_or(0);
     let active = state::current_theme(paths)?;
@@ -663,6 +696,32 @@ pub fn apply_now(paths: &Paths) -> Result<Applied> {
     })
 }
 
+/// The day or night bar (S10): switched once per boundary, like the theme; `wanted` empty
+/// leaves the bar alone. Returns the bar switched to.
+fn apply_bar(paths: &Paths, wanted: &str, boundary: i64) -> Result<Option<String>> {
+    use crate::desktop::bar::saved;
+    if wanted.is_empty() {
+        return Ok(None);
+    }
+    let remember = || {
+        fs::create_dir_all(paths.root())?;
+        fs::write(bar_state_file(paths), format!("{boundary}\n")).context("saving schedule state")
+    };
+    if saved::in_use(paths).is_some_and(|n| n.eq_ignore_ascii_case(wanted)) {
+        remember()?;
+        return Ok(None);
+    }
+    let handled = fs::read_to_string(bar_state_file(paths))
+        .ok()
+        .and_then(|t| t.trim().parse::<i64>().ok());
+    if handled == Some(boundary) {
+        return Ok(None); // switched by hand since: kept until the next boundary
+    }
+    saved::use_bar(paths, wanted)?;
+    remember()?;
+    Ok(Some(wanted.to_string()))
+}
+
 // ---------------------------------------------------------------- changing it
 
 /// Check a schedule can run: both themes exist, and the place or times are good.
@@ -681,6 +740,15 @@ pub fn validate(paths: &Paths, s: &Schedule) -> Result<()> {
     }
     if s.mode == Mode::Sun {
         s.location()?;
+    }
+    let bars: Vec<String> = crate::desktop::bar::saved::list(paths)
+        .into_iter()
+        .map(|b| b.name.to_lowercase())
+        .collect();
+    for (what, name) in [("day", &s.day_bar), ("night", &s.night_bar)] {
+        if !name.is_empty() && !bars.contains(&name.to_lowercase()) {
+            bail!("the {what} bar `{name}` isn't a saved bar (palette desktop bar saved)");
+        }
     }
     Ok(())
 }
@@ -722,6 +790,9 @@ pub struct Update {
     pub lon: Option<f64>,
     /// "07:00,19:00": fixed times (day first).
     pub at: Option<String>,
+    /// Saved bars for the day and the night; `none` (or empty) clears one.
+    pub day_bar: Option<String>,
+    pub night_bar: Option<String>,
 }
 
 /// `palette schedule on`: merge the options into the saved schedule, turn it
@@ -734,6 +805,13 @@ pub fn enable(paths: &Paths, u: Update) -> Result<Applied> {
     }
     if let Some(night) = u.night {
         s.night = night;
+    }
+    let bar = |v: String| if v == "none" { String::new() } else { v };
+    if let Some(b) = u.day_bar {
+        s.day_bar = bar(b);
+    }
+    if let Some(b) = u.night_bar {
+        s.night_bar = bar(b);
     }
     match (u.lat, u.lon) {
         (Some(lat), Some(lon)) => {
@@ -1088,6 +1166,8 @@ mod tests {
             lon: Some(-103.25),
             day_at: 6 * 60 + 30,
             night_at: 19 * 60 + 45,
+            day_bar: "Work".into(),
+            night_bar: String::new(),
         };
         let mut all = settings::load(&paths).unwrap();
         all.schedule = s.clone();

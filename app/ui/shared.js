@@ -47,6 +47,9 @@ function el(tag, props = {}, ...children) {
 
 // ---------------------------------------------------------------- shared
 
+/** The name a theme is shown by (17b, `palette rename`): its display name, else its folder's. */
+function shownName(t) { return t.title || t.name; }
+
 /** Paint the window itself in the active theme. */
 function paintChrome() {
   const cur = themes.find((t) => t.current && !t.invalid) || themes.find((t) => !t.invalid);
@@ -149,6 +152,16 @@ async function load() {
   themes = await invoke("themes");
   thumbs = new Map(); // wallpapers may have changed since last time
   paintChrome();
+  if (!document.body.classList.contains("window")) await paintGlass();
+}
+
+/** Palette's own glass (15b) on the picker and quick switcher: the panel fills the window
+ *  (macOS's blur covers all of it) and its background lets the desktop through. */
+async function paintGlass() {
+  let g = { kind: "solid", opacity: 1 };
+  try { g = await invoke("palette_glass"); } catch { /* an older core: solid */ }
+  document.body.classList.toggle("glass", g.kind !== "solid");
+  document.documentElement.style.setProperty("--panel-alpha", `${Math.round(g.opacity * 100)}%`);
 }
 
 /** The words the chips offer; words in one group exclude each other (dark or light). */
@@ -229,6 +242,40 @@ async function recordKey(e) {
 /** Run a window's view: draw it once every script of the page has loaded, again on each
  *  focus (windows are hidden, not closed, until idle), and after any switch. A view with
  *  its own `onFocus` (Settings) decides for itself what a focus redraws. */
+// 25b: an app an import brought configs for is installed now. Asked once per app (then a
+// row in Settings → Apps keeps the offer). Palette runs nothing: "Use it" adds Palette's line
+// to the imported config; starting SketchyBar is the person's own `brew services start`.
+let arrivedShown = false;
+async function offerArrived(after) {
+  if (arrivedShown || document.querySelector(".arrived")) return;
+  const list = await invoke("arrived").catch(() => []);
+  const a = list.find((x) => x.state === "ask");
+  if (!a) return;
+  arrivedShown = true;
+  const close = () => box.remove();
+  const answer = async (use) => {
+    close();
+    try {
+      const problems = await invoke("answer_arrived", { id: a.id, useIt: use });
+      if (use) toast(problems.length ? problems.join(" · ") : `${a.name} uses your imported config, in Palette's colours`, problems.length > 0);
+    } catch (e) { toast(String(e), true); }
+    if (after) after();
+  };
+  const copy = () => invoke("copy_text", { text: a.start }).then(() => toast("Copied: paste it into Terminal")).catch((e) => toast(String(e), true));
+  const box = el("div", { class: "arrived", role: "dialog", "aria-label": `${a.name} is installed` },
+    el("div", { class: "arrived-card" },
+      el("div", { class: "title" }, `${a.name} is installed`),
+      el("div", { class: "sub" }, `Use the config you imported from your other Mac? Palette adds its colour line to it (backed up first).`
+        + (a.start ? " Then start it yourself:" : "")),
+      a.start ? el("code", { class: "arrived-cmd" }, a.start) : null,
+      el("div", { class: "arrived-btns" },
+        el("button", { class: "btn", onclick: () => answer(false) }, "Not now"),
+        a.start ? el("button", { class: "btn", onclick: copy }, "Copy the start command") : null,
+        el("button", { class: "btn primary", onclick: () => answer(true) }, "Use it"))));
+  document.body.append(box);
+  box.querySelector(".btn.primary").focus();
+}
+
 function start(view) {
   window.addEventListener("focus", () => (view.onFocus ? view.onFocus() : view.open()));
   listen("theme-changed", async () => { await load(); view.render(); });

@@ -23,9 +23,10 @@ A target (struct `Target` in `src/targets/mod.rs`) says:
 | `unload` | Optional. After `init --remove`, bring the app back to the user's own config. Default: reload |
 | `env` | Shell lines this target adds to `shell.sh` (for tools configured by environment variables) |
 | `doctor` | Extra `palette doctor` findings, as `Note::ok(..)` or `Note::fix(..)` |
+| `verify` | Optional. `palette verify`: read back what the running app shows. `Done` = the current theme, `Failed` = not, `Skipped` = can't tell |
 
 Use `..BASE` for the parts you do not need. The defaults are: no output, `Wiring::Shell`,
-"not installed", "nothing to reload", no env lines, no doctor notes.
+"not installed", "nothing to reload", no env lines, no doctor notes, nothing to verify.
 
 ## Files in the module
 
@@ -138,6 +139,10 @@ as fatal.
 
 `doctor` returns extra notes, such as a minimum version. The common "installed" and
 "wired" findings come for free.
+
+`verify` reads back what the app took: compare the file it loads with Palette's
+(`verify::same_file`), or ask the running app (only outside a fake home: return
+`Skipped(verify::FAKE)` there). Leave it out when the app just reads Palette's file itself.
 
 ## Testing
 

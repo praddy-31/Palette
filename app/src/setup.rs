@@ -94,6 +94,34 @@ pub(crate) async fn check() -> Result<Vec<CheckRow>, AppError> {
     .map_err(err)?
 }
 
+/// `palette verify`: what each running app shows, as rows (`ok` / `fix` / `off`) for the
+/// Setup tab. Asks the apps (SketchyBar, Rex), so off the main thread.
+#[tauri::command]
+pub(crate) async fn verify() -> Result<Vec<CheckRow>, AppError> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let paths = paths()?;
+        Ok(palette::verify::run(&paths, None)
+            .map_err(err)?
+            .into_iter()
+            .map(|r| {
+                let (status, detail) = match r.outcome {
+                    palette::Outcome::Done(t) => ("ok", t),
+                    palette::Outcome::Failed(t) => ("fix", t),
+                    palette::Outcome::Skipped(t) | palette::Outcome::Unchanged(t) => ("off", t),
+                };
+                CheckRow {
+                    name: r.name,
+                    status,
+                    detail,
+                    notes: Vec::new(),
+                }
+            })
+            .collect())
+    })
+    .await
+    .map_err(err)?
+}
+
 /// `palette refresh`: render the active theme again.
 #[tauri::command]
 pub(crate) async fn refresh(app: AppHandle) -> Result<Applied, AppError> {

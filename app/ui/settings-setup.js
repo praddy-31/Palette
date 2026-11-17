@@ -21,6 +21,27 @@ Object.assign(settings, {
     this.check();
   },
 
+  // `palette verify`: one line per app that could be read back.
+  async verify() {
+    const out = $("#verify-out");
+    const btn = $("#verify");
+    btn.disabled = true;
+    out.replaceChildren(el("div", { class: "empty" }, "Asking the apps…"));
+    try {
+      const rows = await invoke("verify");
+      const sign = { ok: "✓", fix: "!", off: "–" };
+      out.replaceChildren(...rows.map((r) =>
+        el("div", { class: `c${r.status === "off" ? " absent" : ""}` },
+          el("span", { class: `s ${r.status}` }, sign[r.status]),
+          el("span", {}, (LABELS[r.name] || [r.name])[0]),
+          el("span", { class: "d" }, r.detail))));
+      if (!rows.length) out.replaceChildren(el("div", { class: "empty" }, "No running app to read back"));
+    } catch (e) {
+      out.replaceChildren(el("div", { class: "empty" }, String(e)));
+    }
+    btn.disabled = false;
+  },
+
   // The same apps, groups and order as the Apps tab; apps that aren't installed
   // stay in place but muted, so the two lists always match.
   async check() {

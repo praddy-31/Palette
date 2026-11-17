@@ -27,7 +27,7 @@ function size(bytes) {
 /** Theme colour keys in words (Settings → Colours). */
 const LABEL = {
   background: "Background", dark_background: "Terminal black", darker_background: "Darkest background",
-  lighter_background: "Panels and tabs", selection: "Selection", foreground: "Text",
+  lighter_background: "Panels and tabs", selection: "Selection (terminals, menus)", editor_selection: "Editor selection", list_selection: "List selection", foreground: "Text",
   dark_foreground: "Secondary text", light_foreground: "Light text", bright_foreground: "Brightest text",
   muted: "Comments", accent: "Accent", red: "Red", yellow: "Yellow", green: "Green", cyan: "Cyan",
   blue: "Blue", magenta: "Magenta", orange: "Orange", brown: "Brown", bright_red: "Bright red",
@@ -51,6 +51,11 @@ const LABELS = {
   fuzzel: ["fuzzel", "The launcher's colours"],
   ghostty: ["Ghostty"], kitty: ["kitty"], alacritty: ["Alacritty"], tmux: ["tmux"],
   wezterm: ["WezTerm", "Colours from one line before `return config` in wezterm.lua"],
+  rex: ["Rex", "Imported as its theme \"palette\" on every switch (needs Remote Control on in Rex → Settings → Rex Server)"],
+  herdr: ["herdr", "Follows the terminal's colours (one setting)"],
+  "herdr-app": ["Herdr", "The desktop app: its own Palette theme"],
+  micro: ["micro", "Its own Palette colour scheme, from micro's next start"],
+  orca: ["Orca", "Its own Palette plugin, updated live: pick \"Palette Dark\" and \"Palette Light\" once in Orca's theme settings. Window glass stays Orca's own setting"],
   vscodium: ["VSCodium"], zed: ["Zed", "Its own Palette theme, opaque or glass"], neovim: ["Neovim"], btop: ["btop"],
   obsidian: ["Obsidian", "A colour snippet in every vault, on top of your theme"],
   shell: ["Shell", "Loads fzf, bat, starship, lazygit colours in new terminals"],
@@ -68,13 +73,15 @@ const GLASS_NOTES = {
   wezterm: "Updates live.",
   dispatch: "Updates live (within 2 s). Dispatch stops at 60 % see-through so text stays readable.",
   easyplots: "The launcher's background. Updates when it opens and live while it's open. No limit: above 60 % see-through text gets hard to read, and EasyPlots' Settings warns.",
+  palette: "The picker and the quick switcher. Shows the next time one opens. Blurred uses macOS's own frosted glass (no strength for the blur).",
+  "herdr-app": "Clear makes Palette's Herdr theme see-through; turn on Frost below so the desktop shows through. The desktop shows from about 70 strength; Herdr's top and bottom bars and parts of the sidebar stay solid. Updates live.",
   "habit-tracker": "The Mac app's window. Updates within 2 s while it follows Palette's colours, otherwise when the window comes to the front. Stops at 60 % see-through, like Dispatch.",
 };
 
 const GROUPS = [
   ["Desktop", ["sketchybar", "sketchybar-item", "borders", "gnome", "kde", "noctalia", "niri", "fuzzel", "wallpaper", "appearance"]],
-  ["Terminals", ["ghostty", "kitty", "alacritty", "foot", "konsole", "gnome-terminal", "wezterm", "tmux"]],
-  ["Editors", ["vscodium", "zed", "neovim", "obsidian"]],
+  ["Terminals", ["ghostty", "kitty", "alacritty", "foot", "konsole", "gnome-terminal", "wezterm", "rex", "tmux", "herdr", "herdr-app"]],
+  ["Editors", ["vscodium", "zed", "orca", "neovim", "micro", "obsidian"]],
   ["Command-line tools", ["shell", "starship", "fzf", "bat", "lazygit", "btop"]],
   ["Apps", ["habit-tracker", "chess-review", "dispatch", "easyplots"]],
 ];
@@ -125,10 +132,29 @@ const settings = {
         plan.replaced.length
           ? el("div", {}, `Replaces ${plan.replaced.length} of your files (backed up first):`, el("ul", {}, ...plan.replaced.map((p) => el("li", {}, p))))
           : el("div", { class: "note" }, "Replaces none of your files."),
+        ...this.importNeeds(plan),
         el("div", { class: "actions" },
           el("button", { class: "btn", onclick: () => this.importApply(plan.dir) }, "Import"),
           el("button", { class: "btn", onclick: () => (box.hidden = true) }, "Cancel")));
     } catch (e) { toast(String(e), true); }
+  },
+
+  // 25a: apps the configs need that this Mac doesn't have. Palette installs nothing: it shows
+  // the brew commands to copy, as Get the tools does.
+  importNeeds(plan) {
+    if (!plan.missing?.length) return [];
+    const script = plan.script.join("\n");
+    const copy = () => invoke("copy_text", { text: script }).then(() => toast("Copied: paste into Terminal")).catch((e) => toast(String(e), true));
+    return [
+      el("div", { class: "import-needs" },
+        el("div", {}, el("b", {}, "Not on this Mac yet: "), plan.missing.map((m) => m.name).join(", ")),
+        el("div", { class: "note" }, "Their configs are imported anyway; each app uses its own once you install it. Palette edits configs and installs nothing: copy the commands into Terminal yourself."),
+        ...plan.missing.filter((m) => !m.commands.length).map((m) => el("div", { class: "note" }, `${m.name}: not in Homebrew, get it from ${m.site || "its website"}.`)),
+        script ? el("pre", { class: "code import-script" }, script) : null,
+        script ? el("div", { class: "actions" },
+          this.btn("Copy commands", copy),
+          this.btn("Open Terminal", () => invoke("open_terminal").catch((e) => toast(String(e), true)))) : null),
+    ];
   },
 
   async importApply(dir) {
@@ -143,6 +169,7 @@ const settings = {
     if (this.system) return;
     this.system = await invoke("system_info");
     const sys = this.system;
+    if (sys.version) $("#version-line").textContent = `Palette ${sys.version}`;
     if (sys.platform !== "linux") return;
     document.body.classList.add("linux");
     const line = $("#mode-line");
@@ -176,6 +203,8 @@ const settings = {
     // Opened on a tab (the picker's Wallpapers button) while this window was hidden.
     const tab = await invoke("pending_tab");
     if (tab) this.show(tab);
+    offerArrived(() => this.tab === "apps" && this.renderApps());
+    desktop.freshApps(); // the running apps on the Windows / Borders pages
     const now = await invoke("stamp");
     if (now === this.stamp) return;
     this.stamp = now;
@@ -212,6 +241,8 @@ const settings = {
     // Opened on a tab (the picker's Wallpapers button) while this window was still loading.
     const tab = await invoke("pending_tab");
     if (tab) this.show(tab);
+    offerArrived(() => this.tab === "apps" && this.renderApps());
+    desktop.freshApps(); // the running apps on the Windows / Borders pages
   },
 
   /** General's switches and menus, from `prefs`. */
@@ -223,6 +254,7 @@ const settings = {
     $("#idle-settings").checked = p.close_idle_settings;
     $("#idle-settings-row").hidden = p.windows === "ready";
     $("#menu-click").value = p.menu_click;
+    $("#reopen").value = p.reopen;
     $("#log-on").checked = p.log;
     $("#mono-greys").checked = p.monochrome.greys;
     $("#mono-tint").checked = p.monochrome.tint;
@@ -233,12 +265,19 @@ const settings = {
   // Built off-screen and swapped in at once: emptying the list first (and waiting on the
   // core meanwhile) made the page short for a moment, which sent the scroll to the top.
   async renderApps() {
-    const [rows, p] = await Promise.all([invoke("apps"), invoke("prefs")]);
+    const [rows, p, waiting, choices] = await Promise.all([invoke("apps"), invoke("prefs"), invoke("arrived").catch(() => []),
+      invoke("pin_choices").catch(() => [])]);
     const byName = new Map(rows.map((r) => [r.name, r]));
     const known = new Set(GROUPS.flatMap(([, names]) => names));
     const groups = [...GROUPS, ["Other", rows.map((r) => r.name).filter((n) => !known.has(n))]];
     const box = document.createDocumentFragment();
     this.renderPerformance(box, p);
+    // Palette's own windows (15b): not an app it themes, so no switch; only their glass.
+    box.append(el("h3", {}, "Palette"));
+    box.append(el("div", { class: "row" },
+      el("div", {}, el("div", { class: "title" }, "Picker and quick switcher"),
+        el("div", { class: "sub" }, "Palette's own windows, in the theme's colours"))));
+    this.renderGlass(box, "palette", "Palette", p);
     for (const [title, names] of groups) {
       const items = names.map((n) => byName.get(n)).filter(Boolean);
       if (!items.length) continue;
@@ -255,15 +294,46 @@ const settings = {
         const extra = a.name === "wallpaper" || a.name === "appearance";
         const state = !a.on ? "off: keeps its own look" : extra ? null : a.detail;
         const sub = [what, state].filter(Boolean).join(" · ");
+        // After the switch in the page (the label's first control stays the switch), shown before it.
+        const pin = a.pinnable && a.on && a.installed ? this.pinControl(a, label, choices) : null;
         box.append(el("label", { class: `row${a.installed ? "" : " absent"}` },
           el("div", {}, el("div", { class: "title" }, label), el("div", { class: "sub" }, sub)),
-          setup, sw));
+          setup, sw, pin));
+        const w = waiting.find((x) => x.id === a.name);
+        if (w) this.renderArrived(box, w);
         if (a.name === "obsidian" && a.on && a.installed) this.renderObsidianLook(box, p);
         if (a.name === "zed" && a.on && a.installed) this.renderZedLook(box, p);
         if (GLASS_NOTES[a.name] && a.on && a.installed) this.renderGlass(box, a.name, label, p);
+        if (p.fonts?.[a.name] && a.on && a.installed) this.renderFont(box, a.name, label, p);
       }
     }
     $("#apps").replaceChildren(box);
+  },
+
+  // ROADMAP 24: the colours this app gets, and the theme it keeps (Follows = the main theme).
+  pinControl(a, label, choices) {
+    const pinned = choices.find(([n]) => n === a.pin);
+    const select = el("select", {
+      class: `select pin${a.pin ? " on" : ""}`,
+      title: a.pin ? `${label} keeps ${pinned?.[1] ?? a.pin} whatever you switch to` : `Keep ${label} on one theme whatever you switch to`,
+    },
+      el("option", { value: "", selected: !a.pin }, "Follows the theme"),
+      ...(a.pin && !pinned ? [el("option", { value: a.pin, selected: "" }, `📌 ${a.pin} (gone)`)] : []),
+      ...choices.map(([n, t]) => el("option", { value: n, selected: n === a.pin }, n === a.pin ? `📌 ${t}` : t)));
+    select.onchange = async () => {
+      select.disabled = true;
+      const theme = select.value || null;
+      try {
+        const problems = await invoke("set_pin", { name: a.name, theme });
+        const shown = choices.find(([n]) => n === theme)?.[1];
+        toast(theme ? `${label} keeps ${shown}` : `${label} follows the theme again`, problems.length > 0);
+      } catch (e) { toast(String(e), true); }
+      await this.renderApps();
+    };
+    return el("span", { class: "pinbox" },
+      el("span", { class: "dots", title: `The colours ${label} gets` },
+        ...a.swatches.map((c) => el("i", { style: { background: c } }))),
+      select);
   },
 
   // Performance mode: one switch, and which parts it covers (each can be left out).
@@ -294,10 +364,10 @@ const settings = {
         el("div", { class: "sub" }, "Easier on the GPU and battery. Your own looks come back when you turn it off. Also in the menu bar")),
       sw(p.on, (v) => save({ on: v }, v ? "Performance mode on" : "Performance mode off: your looks are back"))));
     const PARTS = [
-      ["glass", "Solid windows", "Ghostty, kitty, Alacritty, WezTerm, Dispatch, EasyPlots, Habit Tracker and Zed"],
+      ["glass", "Solid windows", "Ghostty, kitty, Alacritty, WezTerm, Dispatch, EasyPlots, Habit Tracker, Zed and Palette's own"],
       ["bar", "Opaque bar", "SketchyBar's pills and background fully opaque, no blur, when Palette manages it (Bar page)"],
       ["borders", "Plain window borders", "JankyBorders without glow and HiDPI, when Palette manages it"],
-      ["stats", "Slower stats pill", "CPU, GPU, temperature… every 30 s instead of every few seconds"],
+      ["stats", "Slower bar", "Stats (CPU, GPU, temperature…) 10× less often, e.g. every 30 s instead of 3; the other pills that refresh on a timer 3× less often; the clock as always"],
     ];
     for (const [part, title, sub] of PARTS) {
       box.append(el("label", { class: "row nested" },
@@ -359,6 +429,69 @@ const settings = {
         el("div", { class: "sub" }, "How see-through: 0 solid, 100 fully clear")), el("div", {}, slider, " ", value)));
   },
 
+  // 25b: installed since an import; the offer the popup made, kept here after "Not now".
+  renderArrived(box, w) {
+    const use = async () => {
+      try {
+        const problems = await invoke("answer_arrived", { id: w.id, useIt: true });
+        toast(problems.length ? problems.join(" · ") : `${w.name} uses your imported config, in Palette's colours`, problems.length > 0);
+      } catch (e) { toast(String(e), true); }
+      await this.renderApps();
+    };
+    const copy = () => invoke("copy_text", { text: w.start }).then(() => toast("Copied: paste it into Terminal")).catch((e) => toast(String(e), true));
+    box.append(el("div", { class: "row nested wrap" },
+      el("div", {}, el("div", { class: "title" }, "Imported from your other Mac"),
+        el("div", { class: "sub" }, `Installed since your import. Use the imported config: Palette adds its colour line (backed up first).${w.start ? ` Start it yourself with ${w.start}.` : ""}`)),
+      el("div", { class: "font-pick" },
+        w.start ? this.btn("Copy start command", copy) : null,
+        this.btn("Use it", use, "btn primary"))));
+  },
+
+  // An app's font under its row (22b): size and family, each "yours" when empty.
+  renderFont(box, app, label, prefs) {
+    const f = prefs.fonts[app];
+    const save = async (args, what) => {
+      try {
+        await invoke("set_font", { app, ...args });
+        toast(`${label}: ${what}`);
+      } catch (e) { toast(String(e), true); }
+      await this.renderApps();
+    };
+    const size = el("input", { class: "search font-size", type: "number", min: "6", max: "48", step: "0.5",
+      placeholder: "yours", value: f.size ?? "", title: "Points; empty = your own size" });
+    size.onchange = () => {
+      const v = size.value.trim();
+      if (!v) return save({ clearSize: true }, "your own font size");
+      const n = Number(v);
+      if (!(n >= 6 && n <= 48)) { size.value = f.size ?? ""; return toast("A font size goes from 6 to 48 points", true); }
+      save({ size: n }, `font size ${n}`);
+    };
+    const family = el("select", { class: "select font-family" },
+      el("option", { value: "" }, "Your own font"),
+      ...(f.family ? [el("option", { value: f.family, selected: "" }, f.family)] : []));
+    invoke("font_families").then((all) => {
+      const nerd = all.filter((x) => /nerd/i.test(x)), rest = all.filter((x) => !/nerd/i.test(x));
+      const group = (title, fs) => el("optgroup", { label: title }, ...fs.map((x) => el("option", { value: x, selected: x === f.family }, x)));
+      const missing = f.family && !all.includes(f.family) ? [el("option", { value: f.family, selected: "" }, `${f.family} (not installed)`)] : [];
+      family.replaceChildren(el("option", { value: "", selected: !f.family }, "Your own font"), ...missing,
+        ...(nerd.length ? [group("Nerd Fonts", nerd)] : []), group("Other fonts", rest));
+    }).catch(() => {});
+    family.onchange = () => family.value
+      ? save({ family: family.value }, `font ${family.value}`)
+      : save({ clearFamily: true }, "your own font");
+    const where = ["zed", "vscodium"].includes(app)
+      ? `Palette changes just this key in ${label}'s settings.json and puts yours back when you pick your own again`
+      : app === "alacritty"
+        ? "Alacritty lets your own [font] lines win over Palette's: remove them for these to show"
+        : app === "ghostty"
+          ? "A choice here wins over your Ghostty config. A window you zoomed (⌘+/⌘−) keeps its zoom until ⌘0"
+          : `A choice here wins over your ${label} config`;
+    box.append(el("div", { class: "row nested wrap" },
+      el("div", {}, el("div", { class: "title" }, "Font"),
+        el("div", { class: "sub" }, `${f.size || f.family ? "" : "Yours: Palette writes nothing. "}${where}.`)),
+      el("div", { class: "font-pick" }, family, size, el("span", { class: "sub" }, "pt"))));
+  },
+
   // A terminal's window under its row: Yours / Solid / Blurred / Clear (Ghostty:
   // also Liquid), how see-through, and how much blur.
   renderGlass(box, app, label, prefs) {
@@ -397,7 +530,23 @@ const settings = {
         el("div", {}, el("div", { class: "title" }, title), el("div", { class: "sub" }, sub)), el("div", {}, input, " ", value)));
     };
     slider("strength", "Strength", "How see-through: 0 solid, 100 fully clear", 100);
-    if (g.kind === "blurred") {
+    if (app === "herdr-app") {
+      // The blur lives in a layout, and Herdr's own layouts are read-only: Frost has Herdr use a
+      // copy of yours with the blur on. One switch; it lasts across restarts.
+      const sw = el("input", { type: "checkbox", class: "switch" });
+      sw.checked = prefs.herdr_frost;
+      sw.onchange = async () => {
+        sw.disabled = true;
+        try { toast(await invoke("set_herdr_frost", { on: sw.checked })); }
+        catch (e) { sw.checked = !sw.checked; toast(String(e), true); }
+        sw.disabled = false;
+      };
+      box.append(el("label", { class: "row nested" },
+        el("div", {}, el("div", { class: "title" }, "Frost"),
+          el("div", { class: "sub" }, "Lets the desktop show through, blurred. Herdr then uses a copy of your layout with its blur on (Herdr's own layouts can't be changed); it stays after restarts. Off: back to your layout. Herdr must be open when you switch it")),
+        sw));
+    }
+    if (g.kind === "blurred" && app !== "palette") {
       const BLUR = {
         ghostty: "How frosted: 20 is Ghostty's default",
         kitty: "How frosted (kitty stops at 64)",
@@ -513,6 +662,8 @@ for (const [id, key] of [["#mono-greys", "greys"], ["#mono-tint", "tint"]]) {
     } catch (err) { toast(String(err), true); }
   };
 }
+$("#reopen").onchange = (e) =>
+  invoke("set_reopen", { what: e.target.value }).catch((err) => toast(String(err), true));
 $("#menu-click").onchange = (e) =>
   invoke("set_app_prefs", { click: e.target.value }).catch((err) => toast(String(err), true));
 $("#log-on").onchange = async (e) => {
@@ -524,7 +675,7 @@ $("#favs-only").onchange = (e) =>
   invoke("set_next_cycles", { cycle: e.target.checked ? "favourites" : "all" }).catch((err) => toast(String(err), true));
 $("#export").onclick = () => settings.exportNow();
 $("#sc-on").onchange = () => schedule.save();
-for (const id of ["#sc-day", "#sc-night", "#sc-mode", "#sc-day-at", "#sc-night-at"]) $(id).onchange = () => schedule.save();
+for (const id of ["#sc-day", "#sc-night", "#sc-day-bar", "#sc-night-bar", "#sc-mode", "#sc-day-at", "#sc-night-at"]) $(id).onchange = () => schedule.save();
 $("#sc-q").addEventListener("input", (e) => schedule.search(e.target.value));
 $("#sc-cities").onchange = (e) => schedule.save({ city: e.target.value, lat: null, lon: null });
 $("#sc-suggest").onclick = () => schedule.save({ city: schedule.s.suggestion, lat: null, lon: null });
@@ -596,6 +747,7 @@ $("#refresh").onclick = async () => {
   try { const r = await invoke("refresh"); report(r); toast(`Re-applied ${r.theme}`); } catch (e) { toast(String(e), true); }
 };
 $("#check").onclick = () => settings.check();
+$("#verify").onclick = () => settings.verify();
 $("#co-theme").onchange = (e) => settings.renderColours(e.target.value);
 $("#co-reset").onclick = () => settings.coEdit({ how: "reset" });
 $("#copy-help").onclick = async () => {

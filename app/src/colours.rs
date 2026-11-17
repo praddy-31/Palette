@@ -55,6 +55,7 @@ pub(crate) struct IssueOut {
     pub(crate) min: f32,
     pub(crate) used_for: &'static str,
     pub(crate) applied: Option<&'static str>,
+    pub(crate) key: &'static str,
     pub(crate) suggested: String,
 }
 
@@ -74,6 +75,8 @@ pub(crate) struct SheetOut {
     pub(crate) apps: Vec<palette::check::AppVerdict>,
     /// Glass lifts per see-through app (11g), as report lines.
     pub(crate) glass: Vec<(String, Vec<String>)>,
+    /// What each kind of app selects in (23b).
+    pub(crate) selections: Vec<palette::check::SelectionUse>,
 }
 
 #[derive(Serialize)]
@@ -151,6 +154,7 @@ pub(crate) fn colour_sheet(name: String) -> Result<SheetOut, AppError> {
     let report = palette::check::run(&paths, Some(&name)).map_err(err)?;
     let apps = palette::check::apps(&paths, Some(&name)).map_err(err)?;
     let glass = report.glass;
+    let selections = palette::check::selections(&paths, &name).map_err(err)?;
     let fixed = report
         .fixed
         .into_iter()
@@ -167,6 +171,7 @@ pub(crate) fn colour_sheet(name: String) -> Result<SheetOut, AppError> {
         fixed,
         apps,
         glass,
+        selections,
         verdict: sheet.report.verdict(),
         theme: sheet.theme,
         mode: sheet.mode.as_str(),
@@ -192,6 +197,7 @@ pub(crate) fn colour_sheet(name: String) -> Result<SheetOut, AppError> {
                 min: i.min,
                 used_for: i.used_for,
                 applied: i.applied,
+                key: i.key,
                 suggested: i.suggested,
             })
             .collect(),

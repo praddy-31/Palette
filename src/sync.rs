@@ -64,6 +64,14 @@ pub fn default_configs(paths: &Paths) -> Vec<String> {
         config.join("starship.toml"),
         home.join("Library/Application Support/VSCodium/User/settings.json"),
         home.join("Library/Application Support/VSCodium/User/keybindings.json"),
+        // Since 25a (2026-11-16): the apps added after the first export list.
+        config.join("wezterm"),
+        home.join(".wezterm.lua"),
+        config.join("zed/settings.json"),
+        config.join("zed/keymap.json"),
+        config.join("micro/settings.json"),
+        config.join("micro/bindings.json"),
+        config.join("herdr/config.toml"),
     ]
     .into_iter()
     .filter(|p| p.exists())
@@ -150,6 +158,15 @@ fn save(paths: &Paths, config: &SyncConfig) -> Result<()> {
 pub struct Copied {
     pub files: usize,
     pub bytes: u64,
+}
+
+/// Finder's `.DS_Store` and backups (`x.bak`, `x.bak-habits`, `x.bak-2026-10-31`) belong to
+/// this Mac: an export leaves them out (owner, 2026-11-16).
+fn is_clutter(rel: &Path) -> bool {
+    let Some(name) = rel.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
+    name == ".DS_Store" || name.ends_with(".bak") || name.contains(".bak-")
 }
 
 /// Copy a file, a symlink (as a link) or a folder tree. Anything else
@@ -274,15 +291,26 @@ pub fn export(paths: &Paths, dir: &Path, options: &ExportOptions) -> Result<Expo
             "themes",
             "wiring",
             "wallpapers",
+            "desktop/bars",
         ]
     } else {
-        &["settings.toml", "sync.toml", "themes", "wiring"]
+        &[
+            "settings.toml",
+            "sync.toml",
+            "themes",
+            "wiring",
+            "desktop/bars",
+        ]
     };
     for &name in names {
         let src = root.join(name);
         if fs::symlink_metadata(&src).is_ok() {
+            // Saved bars travel (18c), but not which one is in use: the other Mac keeps its
+            // own bar until you pick one there (else its next Apply would overwrite it).
             let skip = |rel: &Path| {
-                !wallpapers && rel.components().any(|c| c.as_os_str() == "backgrounds")
+                (!wallpapers && rel.components().any(|c| c.as_os_str() == "backgrounds"))
+                    || rel == Path::new(".in-use")
+                    || is_clutter(rel)
             };
             copy_tree(&src, &dir.join("palette").join(name), &skip, &mut palette)?;
         }
@@ -308,6 +336,7 @@ pub fn export(paths: &Paths, dir: &Path, options: &ExportOptions) -> Result<Expo
             let skip = |rel: &Path| {
                 rel.extension().is_some_and(|e| e == "log")
                     || rel.components().any(|c| c.as_os_str() == ".git")
+                    || is_clutter(rel)
             };
             copy_tree(
                 &src,

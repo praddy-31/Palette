@@ -29,6 +29,7 @@ pub const TARGET: Target = Target {
         read,
         write,
         prepare: Some(prepare),
+        create: false,
     }),
     installed: |_| super::has_program("btop"),
     reload,

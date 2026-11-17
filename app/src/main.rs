@@ -29,10 +29,13 @@ use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use tauri_plugin_positioner::{Position, WindowExt};
 
+mod beats;
 mod catalog;
 mod cli;
 mod colours;
 mod desktop;
+#[cfg(target_os = "macos")]
+mod launches;
 mod library;
 mod prefs;
 mod schedule;
@@ -169,7 +172,7 @@ fn main() {
                 } else if settings {
                     show_settings(app);
                 } else if !link && !login {
-                    show_picker(app, false);
+                    reopened(app);
                 }
             });
         }))
@@ -215,6 +218,10 @@ fn main() {
             set_performance,
             set_zed_look,
             set_glass,
+            set_font,
+            palette_glass,
+            set_reopen,
+            rename_theme,
             set_login,
             open_settings,
             cli_status,
@@ -239,6 +246,12 @@ fn main() {
             save_theme_from_wallpaper,
             setup_all,
             check,
+            verify,
+            set_pin,
+            set_herdr_frost,
+            bar_icon_choices,
+            pin_choices,
+            pins,
             refresh,
             colour_sheet,
             edit_colours,
@@ -258,9 +271,21 @@ fn main() {
             prompt_preset,
             bar_kinds,
             bar_move_pill,
+            bar_presets,
+            bar_add_preset,
+            bar_look,
+            bar_pill_action,
+            bar_live,
+            bar_saved,
+            bar_save_as,
+            bar_use,
+            bar_rename_saved,
+            bar_delete_saved,
             running_apps,
             import_dialog,
             import_apply,
+            arrived,
+            answer_arrived,
             open_settings_tab,
             schedule_get,
             schedule_save,
@@ -306,6 +331,15 @@ fn main() {
             route_login_item_through_macos();
             relink_old_cli();
             allow_cache(app);
+            // The bar's pill scripts follow this version of the app (ROADMAP 28).
+            std::thread::spawn(|| {
+                if let Ok(paths) = paths()
+                    && let Some((_, palette::system::Outcome::Failed(e))) =
+                        palette::bar_scripts_effect(&paths)
+                {
+                    eprintln!("palette: bar scripts: {e}");
+                }
+            });
             let hotkey = paths()
                 .and_then(|p| palette::settings::load(&p).map_err(err))
                 .map(|s| s.hotkey)
@@ -344,6 +378,7 @@ fn main() {
             std::thread::spawn(move || {
                 loop {
                     schedule_tick(&ticker);
+                    beats::sync(); // the beat lines' helper follows the bar (ROADMAP 20)
                     std::thread::sleep(until_next_minute());
                 }
             });
@@ -356,6 +391,10 @@ fn main() {
                     eprintln!("palette: wallpaper on the new display: {e}");
                 }
             });
+
+            // Orca or Rex started after a switch it missed: send it the current theme.
+            #[cfg(target_os = "macos")]
+            launches::watch();
 
             // palette:// links, including the one that launched the app.
             let links = handle.clone();
@@ -402,10 +441,10 @@ fn main() {
             // The last window closed (the idle check, or you closed Settings): Tauri would
             // quit here. Palette lives in the menu bar, so it stays; Quit still quits.
             RunEvent::ExitRequested { code, api, .. } if keep_running(code) => api.prevent_exit(),
-            // Opening the app again (Finder, Spotlight, `open -a Palette`) shows the picker.
+            // Opening the app again (Finder, Spotlight, `open -a Palette`): what you chose (17c).
             // macOS only: on Linux a second launch reaches the single-instance handler.
             #[cfg(target_os = "macos")]
-            RunEvent::Reopen { .. } => later(app, |app| show_picker(app, false)),
+            RunEvent::Reopen { .. } => later(app, reopened),
             _ => {}
         });
 }

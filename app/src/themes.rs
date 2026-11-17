@@ -24,6 +24,10 @@ pub(crate) struct ThemeInfo {
     pub(crate) contrast: Vec<String>,
     /// Words for search by look (12c, `palette::search::tags`).
     pub(crate) tags: Vec<&'static str>,
+    /// installed / yours / edited (17d, `palette::theme::badges`).
+    pub(crate) badges: Vec<&'static str>,
+    /// The name shown (17b, `palette rename`); `None`: the folder name.
+    pub(crate) title: Option<String>,
 }
 
 /// `palette check` as lines for a badge's tooltip: "what: ratio … — fix".
@@ -54,6 +58,8 @@ pub(crate) fn info(theme: &Theme, origin: &'static str, current: bool) -> ThemeI
         glass_lift: None,
         contrast: contrast_lines(&palette::check::theme(theme)),
         tags: palette::search::tags(&theme.colors),
+        badges: palette::theme::badges(theme),
+        title: None,
     }
 }
 
@@ -81,6 +87,7 @@ pub(crate) fn themes() -> Result<Vec<ThemeInfo>, AppError> {
                     .then(|| palette::effects::wallpaper_to_use(&paths, &theme, None))
                     .flatten();
                 out.push(ThemeInfo {
+                    title: settings.names.get(&name).cloned(),
                     favourite: favourites.contains(&name),
                     glass_lift: settings.glass_lift.get(&name).copied(),
                     glass_wallpaper: shown
@@ -89,6 +96,7 @@ pub(crate) fn themes() -> Result<Vec<ThemeInfo>, AppError> {
                 })
             }
             Err(e) => out.push(ThemeInfo {
+                title: settings.names.get(&name).cloned(),
                 favourite: favourites.contains(&name),
                 name,
                 origin,
@@ -102,6 +110,7 @@ pub(crate) fn themes() -> Result<Vec<ThemeInfo>, AppError> {
                 invalid: Some(err(e).message),
                 contrast: Vec::new(),
                 tags: Vec::new(),
+                badges: Vec::new(),
             }),
         }
     }
@@ -240,6 +249,8 @@ pub(crate) async fn run_switch(app: AppHandle, how: Switch) -> Result<Applied, A
 #[derive(Serialize, Clone)]
 pub(crate) struct Switched {
     pub(crate) theme: String,
+    /// The name shown (17b).
+    pub(crate) title: String,
     pub(crate) problems: Vec<String>,
     /// This was an undo: say "Back to X", no Undo button.
     pub(crate) undo: bool,
@@ -264,6 +275,9 @@ pub(crate) fn announce(app: &AppHandle, result: &Applied, undo: bool) {
         })
         .unwrap_or_default();
     let switched = Switched {
+        title: paths()
+            .map(|p| palette::title(&p, &result.theme))
+            .unwrap_or_else(|_| result.theme.clone()),
         theme: result.theme.clone(),
         problems: result.problems.clone(),
         undo,
@@ -309,9 +323,9 @@ pub(crate) fn announce(app: &AppHandle, result: &Applied, undo: bool) {
 #[cfg(target_os = "linux")]
 pub(crate) fn notify_switch(app: &AppHandle, result: &Applied, undo: bool) {
     let title = if undo {
-        format!("Back to {}", result.theme)
+        format!("Back to {}", shown_name(&result.theme))
     } else {
-        format!("Switched to {}", result.theme)
+        format!("Switched to {}", shown_name(&result.theme))
     };
     let mut args = vec![
         "--app-name=Palette".to_string(),
@@ -451,4 +465,21 @@ pub(crate) fn set_hotkey(app: AppHandle, combo: String) -> Result<String, AppErr
 pub(crate) fn hide(window: WebviewWindow) {
     // Hidden, and closed a moment later with windows on demand (`put_away`).
     crate::windows::put_away(&window);
+}
+
+/// The name a theme is shown by (17b).
+#[cfg(target_os = "linux")]
+fn shown_name(theme: &str) -> String {
+    paths().map_or_else(|_| theme.to_string(), |p| palette::title(&p, theme))
+}
+
+/// My themes → Rename (`palette rename`): `title` empty or `None` gives the folder name back.
+/// Returns the name shown now.
+#[tauri::command]
+pub(crate) async fn rename_theme(name: String, title: Option<String>) -> Result<String, AppError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        palette::rename(&paths()?, &name, title.as_deref()).map_err(err)
+    })
+    .await
+    .map_err(err)?
 }

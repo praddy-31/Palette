@@ -107,6 +107,8 @@ const keys = {
         line("↑ ↓", "Through the tabs (in the list); setting to setting on a page; through the themes (My themes)"),
         line("← →", "From the page to the tab list, and back"),
         line("↩  F", "My themes: use the chosen theme, star it"),
+        line("← →  ⌥← →", "Bar: move the chosen item; ⌥ (or a chosen pill): the whole pill"),
+        line("⌫  ⌘Z  ⇧⌘Z", "Bar: remove the chosen item; undo, redo (until Apply)"),
         line("/  ⌘F", "Search (My themes, Get themes), or the theme menu (Colours, Wallpapers)"),
         line("Tab  Space", "Move between controls, press one (as anywhere on the Mac)"),
         line("Esc", "Leave a box, menu or control, so letters and numbers are shortcuts again"),
@@ -118,6 +120,9 @@ const keys = {
   },
 
   onKey(e) {
+    // The Bar page's own keys first (desktop-bar.js): ← → move the chosen item or pill, ⌫ removes
+    // it, ⌘Z / ⇧⌘Z undo and redo, Esc lets go of it.
+    if (typeof desktop !== "undefined" && desktop.barKey?.(e)) return;
     const cmd = e.metaKey && !e.ctrlKey && !e.altKey;
     // ⌘ shortcuts work even inside a box.
     if (cmd && (e.key === "[" || e.key === "]")) { e.preventDefault(); return this.step(e.key === "]" ? 1 : -1); }

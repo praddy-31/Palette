@@ -133,9 +133,35 @@ fn only_apps_whose_file_changed_reload() {
 #[test]
 fn every_glass_app_is_a_target_so_its_file_can_be_rendered_alone() {
     let names: Vec<&str> = palette::targets::all().map(|t| t.name).collect();
-    for app in palette::settings::GLASS_APPS {
-        assert!(names.contains(&app), "{app} is not a target name");
+    // Palette's own windows (15b) have no file: the app reads the setting when it opens them.
+    for app in palette::settings::GLASS_APPS
+        .iter()
+        .filter(|a| **a != "palette")
+    {
+        assert!(names.contains(app), "{app} is not a target name");
     }
+}
+
+/// Palette's own glass (15b): solid until chosen, no "own" (it has no config to leave it to),
+/// saved without touching any app's file or Undo, and solid again in Performance mode.
+#[test]
+fn palettes_own_glass() {
+    use palette::settings::TermGlass;
+    let home = Home::new();
+    home.ok(&["set", "nord"]);
+    let paths = palette::Paths::fake_home(home.dir.path());
+    let load = || palette::settings::load(&paths).unwrap();
+    assert_eq!(load().glass("palette").kind, TermGlass::Solid);
+    assert!(palette::glass(&paths, "palette", Some(TermGlass::Own), None, None).is_err());
+    let (files, gens) = (current_files(&home), generations(&home));
+    palette::glass(&paths, "palette", Some(TermGlass::Blurred), Some(30), None).unwrap();
+    assert_eq!(load().glass("palette").kind, TermGlass::Blurred);
+    assert_eq!(load().glass("palette").strength, 30);
+    assert_eq!(current_files(&home), files, "no app's file changed");
+    assert_eq!(generations(&home), gens, "no Undo step");
+    palette::performance(&paths, Some(true), &[]).unwrap();
+    assert_eq!(load().glass("palette").kind, TermGlass::Solid);
+    assert_eq!(load().glass_saved("palette").kind, TermGlass::Blurred);
 }
 
 /// Settings redraws on focus only when this fingerprint changed (14b): the same when nothing

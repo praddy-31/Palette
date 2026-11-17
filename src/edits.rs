@@ -84,15 +84,38 @@ pub fn sheet(paths: &Paths, name: &str) -> Result<Sheet> {
     let original = theme::load_original(paths, name)?;
     // Your values, before Palette's readability fixes: this is what you edit.
     let now = theme::load_edited(paths, name)?;
-    let colours = now
+    // Own keys (23b: `editor_selection`): yours or the theme's, else what Palette works out
+    // from the colours apps get (after its fixes), which is then also the "original".
+    let level = crate::normalise::level_for(paths, name);
+    let mut fixed = theme::load_fixed(paths, name)?.0.colors;
+    let worked_out = |key: &str, c: &mut theme::Colors| {
+        c.unset(key);
+        match key {
+            "editor_selection" => crate::normalise::editor_selection(c, level),
+            _ => String::new(),
+        }
+    };
+    let mut colours: Vec<Swatch> = now
         .colors
         .iter()
+        .filter(|(k, _)| !theme::OWN_KEYS.contains(k))
         .map(|(key, value)| Swatch {
             key,
             value: value.to_string(),
             original: original.colors.get(key).to_string(),
         })
         .collect();
+    for key in theme::OWN_KEYS {
+        let auto = worked_out(key, &mut fixed);
+        colours.push(Swatch {
+            key,
+            value: now
+                .colors
+                .get_opt(key)
+                .map_or_else(|| auto.clone(), String::from),
+            original: original.colors.get_opt(key).map_or(auto, String::from),
+        });
+    }
     Ok(Sheet {
         theme: name.to_string(),
         mode: now.colors.mode,
@@ -128,12 +151,20 @@ pub fn apply(paths: &Paths, name: &str, edit: &Edit) -> Result<Changes> {
             let Some(k) = theme::colour_key(key) else {
                 bail!("`{key}` is not a theme colour (see `palette colours {name}`)");
             };
-            vec![(key.clone(), original.colors.get(k).to_string())]
+            vec![(
+                key.clone(),
+                original.colors.get_opt(k).unwrap_or("").to_string(),
+            )]
         }
         Edit::Reset(None) => edits
             .keys()
             .filter_map(|k| theme::colour_key(k))
-            .map(|k| (k.to_string(), original.colors.get(k).to_string()))
+            .map(|k| {
+                (
+                    k.to_string(),
+                    original.colors.get_opt(k).unwrap_or("").to_string(),
+                )
+            })
             .collect(),
         Edit::FixContrast => fix_contrast(name, now.clone()),
     };
@@ -141,12 +172,14 @@ pub fn apply(paths: &Paths, name: &str, edit: &Edit) -> Result<Changes> {
     let mut changed = Vec::new();
     for (key, value) in wanted {
         let k = theme::colour_key(&key).expect("checked above");
-        if original.colors.get(k) == value {
+        // "" = an own key the theme leaves unset: back to Palette's own choice.
+        if value.is_empty() || original.colors.get_opt(k) == Some(value.as_str()) {
             edits.remove(&key);
         } else {
             edits.insert(key.clone(), value.clone());
         }
-        if now.get(k) != value {
+        if now.get_opt(k) != Some(value.as_str()) && !(value.is_empty() && now.get_opt(k).is_none())
+        {
             changed.push((key, value));
         }
     }
@@ -169,10 +202,10 @@ fn fix_contrast(name: &str, mut colours: theme::Colors) -> Changes {
         }
         let mut seen = Vec::new();
         for issue in &report.issues {
-            if !seen.contains(&issue.fg) {
-                seen.push(issue.fg);
-                colours.set(issue.fg, &issue.suggested);
-                changed.insert(issue.fg.to_string(), issue.suggested.clone());
+            if !seen.contains(&issue.key) {
+                seen.push(issue.key);
+                colours.set(issue.key, &issue.suggested);
+                changed.insert(issue.key.to_string(), issue.suggested.clone());
             }
         }
     }
@@ -309,6 +342,24 @@ mod tests {
         );
         let changed = apply(&paths, "tokyo-night", &Edit::FixContrast).unwrap();
         assert!(changed.iter().any(|(k, _)| k == "foreground"));
+        let after = sheet(&paths, "tokyo-night").unwrap();
+        assert!(after.report.issues.is_empty(), "{:?}", after.report.issues);
+    }
+
+    #[test]
+    fn a_white_selection_is_fixed_by_moving_the_selection_not_the_text() {
+        // Snow Black: white text, white selection. Darkening the text instead
+        // turned body text grey on black.
+        let (_h, paths) = home();
+        apply(&paths, "tokyo-night", &set("background", "#000000")).unwrap();
+        apply(&paths, "tokyo-night", &set("foreground", "#ffffff")).unwrap();
+        apply(&paths, "tokyo-night", &set("selection", "#ffffff")).unwrap();
+        let changed = apply(&paths, "tokyo-night", &Edit::FixContrast).unwrap();
+        assert!(changed.iter().any(|(k, _)| k == "selection"), "{changed:?}");
+        assert!(
+            !changed.iter().any(|(k, _)| k == "foreground"),
+            "{changed:?}"
+        );
         let after = sheet(&paths, "tokyo-night").unwrap();
         assert!(after.report.issues.is_empty(), "{:?}", after.report.issues);
     }

@@ -1,6 +1,11 @@
 #!/bin/bash
-# Palette bar: CPU GPU TEMP POWER MEM DISK VPN NET. One run updates the ones in
-# STATS (item names). DISK_AT: the disk shows from this % full.
+# Palette bar: CPU GPU TEMP GPUTEMP POWER MEM DISK VPN NET. One run updates the ones in
+# STATS (item names). DISK_AT: the disk shows from this % full. EVERY: seconds between runs.
+# GPU: busy (macmon's busy share) or raw (the GPU driver's figure).
+# With macmon (brew install macmon): CPU, GPU, temperatures, power and memory come from one
+# long-running macmon (stats_feed.sh, started here once: ROADMAP 16a), and this script only
+# does the network each run and the disk, VPN and Wi-Fi every 30 s. Without macmon:
+# everything here, CPU from `top` (no temperature or power).
 export PATH="$PATH:/opt/homebrew/bin:/usr/sbin:/sbin"
 export LC_ALL=C
 [ -f "$HOME/.config/palette/current/sketchybar.sh" ] && source "$HOME/.config/palette/current/sketchybar.sh"
@@ -9,6 +14,28 @@ has() { case " $STATS " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
 ICON_NET=$(printf '\xef\x80\x99')      # download arrow: shown when you are not on Wi-Fi
 ICON_WIFI=$(printf '\xef\x87\xab')
 DEG=$(printf '\xc2\xb0')
+STATE_DIR="${TMPDIR:-/tmp}"
+
+# ---- The feeder: started once, replaced when what it shows changes ----
+FEED=""
+for s in cpu gpu temp gputemp pwr mem; do has "$s" && FEED="$FEED $s"; done
+FED=0
+if [ -n "$FEED" ] && command -v macmon >/dev/null 2>&1; then
+  SIG="${FEED# }|${EVERY:-5}|${GPU:-busy}|${ICON_KEY:-blue}"
+  PIDF="$STATE_DIR/palette_stats_feed"
+  PID=""; OLD=""
+  [ -f "$PIDF" ] && { read -r PID; read -r OLD; } < "$PIDF"
+  if [ -z "$PID" ] || [ "$OLD" != "$SIG" ] || ! kill -0 "$PID" 2>/dev/null; then
+    # Its own process group (set -m), so the whole pipeline goes with one kill.
+    [ -n "$PID" ] && kill -TERM -- "-$PID" 2>/dev/null
+    set -m
+    FEED="${FEED# }" EVERY="${EVERY:-5}" GPU="${GPU:-busy}" ICON_KEY="${ICON_KEY:-blue}" \
+      nohup bash "$(dirname "$0")/stats_feed.sh" >/dev/null 2>&1 &
+    printf '%s\n%s\n' "$!" "$SIG" > "$PIDF"
+    set +m
+  fi
+  FED=1
+fi
 
 is_num() { case "$1" in ''|*[!0-9]*) return 1 ;; *) return 0 ;; esac; }
 
@@ -20,19 +47,23 @@ color_for() {      # blue normally, yellow from 60%, red from 85%
 
 # ---- TEMP + POWER: macmon (brew install macmon), no sudo. Started now in the background so
 #      its half-second sample overlaps with the top sample below instead of adding to it ----
-MM_OUT=$(mktemp -t sketchybar_macmon)
+MM_OUT=""
 MM_PID=""
-if { has temp || has pwr; } && command -v macmon >/dev/null 2>&1; then
+CPU=""; GPU_PCT=""; MEM=""
+if [ "$FED" = 0 ] && { has temp || has pwr; } && command -v macmon >/dev/null 2>&1; then
+  MM_OUT=$(mktemp -t sketchybar_macmon)
   macmon pipe -s 1 -i 500 > "$MM_OUT" 2>/dev/null &
   MM_PID=$!
 fi
 
-# ---- CPU: 100 - idle, from the second of two one-second top samples ----
-CPU=$(top -l 2 -n 0 -s 1 2>/dev/null \
+if [ "$FED" = 0 ]; then
+# ---- CPU: 100 - idle, from the second of two one-second top samples (only when shown:
+#      `top` takes over a second) ----
+has cpu && CPU=$(top -l 2 -n 0 -s 1 2>/dev/null \
   | awk '/^CPU usage/ { idle = $7 } END { if (idle != "") printf "%.0f", 100 - idle }')
 
 # ---- GPU: device utilisation from the GPU driver (works without sudo) ----
-GPU=$(ioreg -r -d 1 -w 0 -c IOAccelerator 2>/dev/null \
+GPU_PCT=$(ioreg -r -d 1 -w 0 -c IOAccelerator 2>/dev/null \
   | grep -o '"Device Utilization %"=[0-9]*' | head -1 | grep -o '[0-9]*$')
 
 # ---- MEM: like Activity Monitor: app memory + wired + compressed ----
@@ -44,9 +75,19 @@ MEM=$(vm_stat 2>/dev/null | awk -v total="$MEM_TOTAL" '
   /^Pages wired down/             { wired = $NF + 0 }
   /^Pages occupied by compressor/ { comp = $NF + 0 }
   END { if (total > 0 && ps > 0) printf "%.0f", (anon - purg + wired + comp) * ps * 100 / total }')
+fi
+
+# ---- Disk, VPN and Wi-Fi change slowly: looked at every 30 s, kept in between ----
+SLOW="$STATE_DIR/palette_stats_slow"
+NOW=$(date +%s)
+SLOW_AT=0; DISK=""; VPN=""; WIFI_IP=""
+[ -f "$SLOW" ] && read -r SLOW_AT DISK VPN WIFI_IP < "$SLOW"
+is_num "$SLOW_AT" || SLOW_AT=0
+FRESH=0
+if [ $((NOW - SLOW_AT)) -ge 30 ] || [ "$FED" = 0 ]; then FRESH=1; fi
 
 # ---- DISK: used % of the data volume ----
-DISK=$(df -k /System/Volumes/Data 2>/dev/null | awk 'NR == 2 { gsub("%", "", $5); print $5 }')
+[ "$FRESH" = 1 ] && DISK=$(df -k /System/Volumes/Data 2>/dev/null | awk 'NR == 2 { gsub("%", "", $5); print $5 }')
 
 # ---- NET: download speed, from the byte counter change since the last run ----
 IFACE=$(route -n get default 2>/dev/null | awk '/interface:/ { print $2 }')
@@ -54,7 +95,6 @@ OFFLINE=0
 if [ -z "$IFACE" ]; then IFACE=en0; OFFLINE=1; fi      # no default route = offline
 read -r RX TX < <(netstat -ibn -I "$IFACE" 2>/dev/null \
   | awk 'NR == 2 { if (NF >= 11) print $7, $10; else print $6, $9 }')
-NOW=$(date +%s)
 STATE="/tmp/sketchybar_net_state"
 NET_DOWN=0
 if is_num "$RX" && is_num "$TX"; then
@@ -75,10 +115,12 @@ NET_LABEL=$(awk -v b="$NET_DOWN" 'BEGIN {
 
 # ---- Wi-Fi: the NET icon shows the state. It stays the Wi-Fi icon while a VPN is the
 #      default route, because it asks the Wi-Fi interface itself rather than the route ----
-WIFI_IF=$(networksetup -listallhardwareports 2>/dev/null \
-  | awk '/Hardware Port: (Wi-Fi|AirPort)/ { getline; print $2; exit }')
-WIFI_IP=""
-[ -n "$WIFI_IF" ] && WIFI_IP=$(ipconfig getifaddr "$WIFI_IF" 2>/dev/null)
+if [ "$FRESH" = 1 ]; then
+  WIFI_IF=$(networksetup -listallhardwareports 2>/dev/null \
+    | awk '/Hardware Port: (Wi-Fi|AirPort)/ { getline; print $2; exit }')
+  WIFI_IP=""
+  [ -n "$WIFI_IF" ] && WIFI_IP=$(ipconfig getifaddr "$WIFI_IF" 2>/dev/null)
+fi
 if [ "$OFFLINE" = 1 ]; then
   NET_ICON=$ICON_WIFI; NET_COLOR=$RED; NET_LABEL="off"
 elif [ -n "$WIFI_IP" ]; then
@@ -88,7 +130,12 @@ else
 fi
 
 # ---- VPN: any VPN service in System Settings (ProtonVPN, Tailscale, ...) that is connected ----
-if scutil --nc list 2>/dev/null | grep -q '(Connected)'; then VPN=on; else VPN=off; fi
+if [ "$FRESH" = 1 ]; then
+  if scutil --nc list 2>/dev/null | grep -q '(Connected)'; then VPN=on; else VPN=off; fi
+  echo "$NOW ${DISK:--} $VPN ${WIFI_IP:--}" > "$SLOW"
+fi
+[ "$DISK" = - ] && DISK=""
+[ "$WIFI_IP" = - ] && WIFI_IP=""
 
 # ---- TEMP + POWER: collect macmon's sample (give up after about 3 seconds) ----
 TEMP=""; PWR=""
@@ -101,7 +148,7 @@ if [ -n "$MM_PID" ]; then
   PWR=$(mm_val sys_power)
   [ -z "$PWR" ] && PWR=$(mm_val all_power)
 fi
-rm -f "$MM_OUT"
+[ -n "$MM_OUT" ] && rm -f "$MM_OUT"
 [ -n "$TEMP" ] && TEMP=$(awk -v t="$TEMP" 'BEGIN { printf "%.0f", t }')
 [ -n "$PWR" ] && PWR=$(awk -v p="$PWR" 'BEGIN { printf "%.0f", p }')
 
@@ -115,9 +162,11 @@ add_pct() {        # $1 = item, $2 = percent (or empty if unavailable)
     args+=(--set "$1" label="--" icon.color=$GREY)
   fi
 }
-add_pct cpu  "$CPU"
-add_pct gpu  "$GPU"
-add_pct mem  "$MEM"
+if [ "$FED" = 0 ]; then
+  add_pct cpu  "$CPU"
+  add_pct gpu  "$GPU_PCT"
+  add_pct mem  "$MEM"
+fi
 
 # disk only shows from DISK_AT % full
 if ! has disk; then :
@@ -127,8 +176,8 @@ else
   args+=(--set disk drawing=off)
 fi
 
-# temperature: blue, yellow from 70, red from 85 (degrees C)
-if ! has temp; then :
+# temperature: blue, yellow from 70, red from 85 (degrees C). Fed: the feeder sets these.
+if ! has temp || [ "$FED" = 1 ]; then :
 elif is_num "$TEMP"; then
   if [ "$TEMP" -ge 85 ]; then C=$RED; elif [ "$TEMP" -ge 70 ]; then C=$YELLOW; else C=$IC; fi
   args+=(--set temp label="${TEMP}${DEG}" icon.color=$C)
@@ -136,8 +185,11 @@ else
   args+=(--set temp label="--" icon.color=$GREY)
 fi
 
+# GPU temperature needs macmon, so without the feeder it's unknown.
+has gputemp && [ "$FED" = 0 ] && args+=(--set gputemp label="--" icon.color=$GREY)
+
 # power: whole-system watts; blue, yellow from 15 W, red from 25 W
-if ! has pwr; then :
+if ! has pwr || [ "$FED" = 1 ]; then :
 elif is_num "$PWR"; then
   if [ "$PWR" -ge 25 ]; then C=$RED; elif [ "$PWR" -ge 15 ]; then C=$YELLOW; else C=$IC; fi
   args+=(--set pwr label="${PWR}W" icon.color=$C)

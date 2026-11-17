@@ -101,6 +101,9 @@ fn source_mac() -> Home {
         "#!/bin/bash\nPILL=0xf0292e42\n",
     );
     home.write(".config/sketchybar/plugins/clock.sh", "date\n");
+    home.write(".config/sketchybar/.DS_Store", "finder");
+    home.write(".config/sketchybar/sketchybarrc.bak-habits", "old");
+    home.write(".config/sketchybar/plugins/clock.sh.bak", "old");
     home.write(".zshrc", "export SECRET=hunter2\n");
     let img = home.write("pic.png", "png");
     home.ok(&["set", "nord"]);
@@ -132,6 +135,10 @@ fn export_takes_palette_and_configs_but_not_shell_rc() {
         !exported("configs/.zshrc").exists(),
         "shell rc files hold secrets"
     );
+    // Finder files and backups stay on this Mac.
+    assert!(!exported("configs/.config/sketchybar/.DS_Store").exists());
+    assert!(!exported("configs/.config/sketchybar/sketchybarrc.bak-habits").exists());
+    assert!(!exported("configs/.config/sketchybar/plugins/clock.sh.bak").exists());
     // Rebuilt on any Mac, so not exported.
     assert!(!exported("palette/generations").exists());
     assert!(!exported("palette/backup").exists());

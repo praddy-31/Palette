@@ -34,7 +34,7 @@ const overlay = {
         ondblclick: () => this.apply(),
       },
         el("span", { class: "dot" }, tinyDesktop(t)),
-        el("span", { class: "name" }, t.name),
+        el("span", { class: "name" }, shownName(t)),
         t.mode === "light" ? el("span", { class: "badge" }, "light") : null)));
     list.querySelector("li.on")?.scrollIntoView({ block: "nearest" });
     const t = shown[this.index];
