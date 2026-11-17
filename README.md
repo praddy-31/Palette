@@ -405,6 +405,8 @@ files:
   [JankyBorders](https://github.com/FelixKratz/JankyBorders) by Felix Kratz
 - [sketchybar-app-font](https://github.com/kvndrsslr/sketchybar-app-font) by kvndrsslr and its
   contributors: the bar's app icons and their `icon_map.sh`
+- [macmon](https://github.com/vladkens/macmon) by vladkens: the bar's CPU, GPU, temperature
+  and power figures, without `sudo`
 - [AeroSpace](https://github.com/nikitabobko/AeroSpace) by Nikita Bobko
 - [Starship](https://github.com/starship/starship) by the Starship contributors
 - [gowall](https://github.com/Achno/gowall) by Achno (optional recolouring engine)
